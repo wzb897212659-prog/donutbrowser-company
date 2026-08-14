@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>三合浏览器管理</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, sans-serif; background:#f5f6f8; color:#172033 }
+      body { margin:0; padding:24px; max-width:1200px; margin-inline:auto }
+      h1,h2 { margin:0 0 16px } .card { background:#fff; border:1px solid #dfe3ea; border-radius:12px; padding:18px; margin-bottom:18px }
+      form,.row { display:flex; flex-wrap:wrap; gap:10px; align-items:center } input,select,button { font:inherit; padding:9px 11px; border:1px solid #cbd2dc; border-radius:8px }
+      input { min-width:180px } button { background:#155eef; color:#fff; border:0; cursor:pointer } button.secondary { background:#566074 } button.danger { background:#b42318 }
+      table { width:100%; border-collapse:collapse } th,td { text-align:left; padding:10px 8px; border-bottom:1px solid #edf0f4; font-size:14px }
+      .hidden { display:none } .muted { color:#687386; font-size:13px } .error { color:#b42318; white-space:pre-wrap }
+      .checks { display:flex; flex-wrap:wrap; gap:8px 16px } label { display:flex; gap:6px; align-items:center }
+    </style>
+  </head>
+  <body>
+    <h1>三合浏览器管理</h1>
+    <section id="loginCard" class="card">
+      <h2>超级管理员登录</h2>
+      <form id="loginForm">
+        <input id="username" autocomplete="username" placeholder="用户名" required />
+        <input id="password" type="password" autocomplete="current-password" placeholder="密码" required />
+        <button>登录</button>
+      </form>
+      <p id="loginError" class="error"></p>
+    </section>
+    <main id="app" class="hidden">
+      <section class="card">
+        <div class="row"><h2 style="flex:1">账号</h2><button id="logout" class="secondary">退出</button></div>
+        <form id="createUser">
+          <input id="newUsername" placeholder="新用户名" required />
+          <input id="newPassword" type="password" placeholder="初始密码（至少12位）" minlength="12" required />
+          <select id="newRole"><option value="admin">管理员</option><option value="super_admin">超级管理员</option></select>
+          <button>创建账号</button>
+        </form>
+        <table><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody id="users"></tbody></table>
+      </section>
+      <section class="card">
+        <h2>环境分配</h2>
+        <p class="muted">选择环境后勾选允许使用的管理员。同一环境可分配多人，但在线只能由一台电脑打开。</p>
+        <select id="profileSelect"></select>
+        <div id="assignments" class="checks"></div>
+        <div class="row" style="margin-top:12px"><button id="saveAssignments">保存分配</button><button id="forceUnlock" class="danger">强制解锁</button></div>
+        <table><thead><tr><th>环境</th><th>内核版本</th><th>修订号</th><th>状态</th><th>操作</th></tr></thead><tbody id="profiles"></tbody></table>
+      </section>
+      <p id="message" class="error"></p>
+    </main>
+    <script>
+      const api = location.pathname.replace(/\/admin\/?$/, "/api");
+      let token = sessionStorage.getItem("sanhe_access") || "";
+      let users = [], profiles = [];
+      const $ = (id) => document.getElementById(id);
+      const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+      async function request(path, options={}) {
+        const response = await fetch(api + path, { ...options, headers:{"Content-Type":"application/json", ...(token?{Authorization:`Bearer ${token}`}:{ }), ...(options.headers||{})} });
+        if (response.status === 204) return null;
+        const body = await response.json().catch(()=>({}));
+        if (!response.ok) throw new Error(body.code || `HTTP ${response.status}`);
+        return body;
+      }
+      function showApp(on){ $("loginCard").classList.toggle("hidden",on); $("app").classList.toggle("hidden",!on) }
+      async function load() {
+        const me = await request("/auth/me");
+        if (me.role !== "super_admin") throw new Error("仅超级管理员可以访问");
+        [users, profiles] = await Promise.all([request("/users"), request("/profiles?includeDeleted=true")]);
+        $("users").innerHTML = users.map(u=>`<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${u.active?"启用":"停用"}</td><td><button class="${u.active?"danger":""}" onclick="setStatus('${u.id}',${!u.active})">${u.active?"停用":"启用"}</button></td></tr>`).join("");
+        $("profileSelect").innerHTML = profiles.filter(p=>!p.deletedAt).map(p=>`<option value="${p.id}">${esc(p.name)} · r${p.revision}</option>`).join("");
+        $("profiles").innerHTML = profiles.map(p=>`<tr><td>${esc(p.name)}</td><td>${esc(p.browserVersion||"-")}</td><td>${p.revision}</td><td>${p.deletedAt?"已删除（30天内可恢复）":"正常"}</td><td><button class="${p.deletedAt?"":"danger"}" onclick="setDeleted('${p.id}',${!p.deletedAt})">${p.deletedAt?"恢复":"删除"}</button></td></tr>`).join("");
+        await loadAssignments(); showApp(true);
+      }
+      async function loadAssignments(){ const id=$("profileSelect").value; if(!id){$("assignments").innerHTML="暂无环境";return} const assigned=await request(`/profiles/${id}/assignments`); $("assignments").innerHTML=users.filter(u=>u.active).map(u=>`<label><input type="checkbox" value="${u.id}" ${assigned.includes(u.id)?"checked":""}/>${esc(u.username)}</label>`).join("") }
+      async function setStatus(id,active){ await request(`/users/${id}/status`,{method:"PATCH",body:JSON.stringify({active})}); await load() } window.setStatus=setStatus;
+      async function setDeleted(id,deleted){ await request(`/profiles/${id}${deleted?"":"/restore"}`,{method:deleted?"DELETE":"POST"}); await load() } window.setDeleted=setDeleted;
+      $("loginForm").onsubmit=async e=>{e.preventDefault();try{const r=await request("/auth/login",{method:"POST",body:JSON.stringify({username:$("username").value,password:$("password").value})});token=r.accessToken;sessionStorage.setItem("sanhe_access",token);await load()}catch(err){$("loginError").textContent=err.message}};
+      $("createUser").onsubmit=async e=>{e.preventDefault();try{await request("/users",{method:"POST",body:JSON.stringify({username:$("newUsername").value,password:$("newPassword").value,role:$("newRole").value})});e.target.reset();await load()}catch(err){$("message").textContent=err.message}};
+      $("profileSelect").onchange=loadAssignments;
+      $("saveAssignments").onclick=async()=>{const id=$("profileSelect").value;const userIds=[...$("assignments").querySelectorAll("input:checked")].map(x=>x.value);await request(`/profiles/${id}/assignments`,{method:"PUT",body:JSON.stringify({userIds})});$("message").textContent="分配已保存"};
+      $("forceUnlock").onclick=async()=>{await request(`/profile-locks/${$("profileSelect").value}/force`,{method:"DELETE"});$("message").textContent="已强制解锁"};
+      $("logout").onclick=()=>{token="";sessionStorage.removeItem("sanhe_access");showApp(false)};
+      if(token) load().catch(()=>{token="";sessionStorage.removeItem("sanhe_access");showApp(false)});
+    </script>
+  </body>
+</html>

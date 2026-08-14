@@ -779,8 +779,11 @@ function ProfileInfoLayout({
     {
       id: "automation",
       icon: <LuLink className="size-3.5" />,
-      label: t("profileInfo.sections.launchHook"),
-      badge: profile.launch_hook ? t("profileInfo.badges.active") : undefined,
+      label: t("profileInfo.sections.launchSettings"),
+      badge:
+        profile.launch_hook || profile.startup_url
+          ? t("profileInfo.badges.active")
+          : undefined,
     },
     {
       id: "security",
@@ -1180,9 +1183,11 @@ function LaunchHookEditor({
 
   return (
     <div className="flex flex-col gap-3">
+      <StartupUrlEditor profile={profile} t={t} />
+      <div className="my-1 border-t border-border" />
       <div className="flex items-center gap-2 text-sm font-semibold">
         <LuLink className="size-4" />
-        {t("profileInfo.sections.launchHook")}
+        {t("profileInfo.launchHook.label")}
       </div>
       <p className="text-xs text-muted-foreground">
         {t("profileInfo.sectionDesc.launchHook")}
@@ -1227,6 +1232,71 @@ function LaunchHookEditor({
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+function StartupUrlEditor({
+  profile,
+  t,
+}: {
+  profile: BrowserProfile;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}) {
+  const { t: tFn } = useTranslation();
+  const [value, setValue] = React.useState(profile.startup_url ?? "");
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const initial = profile.startup_url ?? "";
+  const trimmed = value.trim();
+  const dirty = value !== initial;
+  const showInvalidHint = trimmed.length > 0 && !isValidHttpUrl(trimmed);
+
+  const onSave = async () => {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await invoke("update_profile_startup_url", {
+        profileId: profile.id,
+        startupUrl: trimmed || null,
+      });
+    } catch (e) {
+      setError(translateBackendError(tFn, e));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2 text-sm font-semibold">
+        <LuGlobe className="size-4" />
+        {t("profileInfo.startupUrl.label")}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {t("profileInfo.startupUrl.description")}
+      </p>
+      <Input
+        type="url"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={t("profileInfo.startupUrl.placeholder")}
+        className="font-mono text-xs"
+      />
+      {showInvalidHint && (
+        <p className="text-xs text-warning">
+          {t("profileInfo.startupUrl.invalidUrlHint")}
+        </p>
+      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <Button
+        size="sm"
+        className="h-7 self-start text-xs"
+        disabled={!dirty || isSaving || showInvalidHint}
+        onClick={() => void onSave()}
+      >
+        {isSaving ? t("common.buttons.saving") : t("common.buttons.save")}
+      </Button>
     </div>
   );
 }

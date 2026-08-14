@@ -11,6 +11,8 @@ import { CloneProfileDialog } from "@/components/clone-profile-dialog";
 import { CloseConfirmDialog } from "@/components/close-confirm-dialog";
 import { CommandPalette } from "@/components/command-palette";
 import { CommercialTrialModal } from "@/components/commercial-trial-modal";
+import { CompanyAdminPage } from "@/components/company-admin-page";
+import { CompanyTransferDialog } from "@/components/company-transfer-dialog";
 import { CookieCopyDialog } from "@/components/cookie-copy-dialog";
 import { CookieManagementDialog } from "@/components/cookie-management-dialog";
 import { CreateProfileDialog } from "@/components/create-profile-dialog";
@@ -48,6 +50,7 @@ import { WindowResizeWarningDialog } from "@/components/window-resize-warning-di
 import { useAppUpdateNotifications } from "@/hooks/use-app-update-notifications";
 import { useCloudAuth } from "@/hooks/use-cloud-auth";
 import { useCommercialTrial } from "@/hooks/use-commercial-trial";
+import { useCompanyAdmin } from "@/hooks/use-company-admin";
 import { useGroupEvents } from "@/hooks/use-group-events";
 import type { PermissionType } from "@/hooks/use-permissions";
 import { usePermissions } from "@/hooks/use-permissions";
@@ -95,6 +98,7 @@ export default function Home() {
   const {
     profiles,
     runningProfiles,
+    loadProfiles,
     isLoading: profilesLoading,
     error: profilesError,
   } = useProfileEvents();
@@ -221,6 +225,16 @@ export default function Home() {
 
   // Cloud auth for cross-OS unlock
   const { user: cloudUser } = useCloudAuth();
+  const isSuperAdmin = cloudUser?.teamRole === "super_admin";
+  const {
+    overview: companyOverview,
+    isLoading: companyAdminLoading,
+    refresh: refreshCompanyAdmin,
+    createAdmin,
+    setAdminStatus,
+    resetAdminPassword,
+    batchTransferProfiles,
+  } = useCompanyAdmin(isSuperAdmin);
   const crossOsUnlocked = getEntitlements(cloudUser).crossOsFingerprints;
   // Bulk run/stop is a paid (browser automation) feature, matching the
   // /v1/profiles/batch/run API gate. Free/starter users see the bulk Run/Stop
@@ -297,6 +311,7 @@ export default function Home() {
     string[]
   >([]);
   const [selectedProfiles, setSelectedProfiles] = useState<string[]>([]);
+  const [companyTransferOpen, setCompanyTransferOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [pendingUrls, setPendingUrls] = useState<PendingUrl[]>([]);
   const [currentProfileForWayfernConfig, setCurrentProfileForWayfernConfig] =
@@ -379,6 +394,8 @@ export default function Home() {
         break;
       case "account":
         setAccountDialogOpen(true);
+        break;
+      case "company-admin":
         break;
       case "shortcuts":
         // Plain page render — nothing else to open.
@@ -806,6 +823,7 @@ export default function Home() {
       ephemeral?: boolean;
       dnsBlocklist?: string;
       launchHook?: string;
+      startupUrl?: string;
       password?: string;
     }) => {
       try {
@@ -821,12 +839,13 @@ export default function Home() {
             wayfernConfig: profileData.wayfernConfig,
             groupId:
               profileData.groupId ??
-              (selectedGroupId && selectedGroupId !== "__all__"
+              (selectedGroupId && !selectedGroupId.startsWith("__")
                 ? selectedGroupId
                 : undefined),
             ephemeral: profileData.ephemeral,
             dnsBlocklist: profileData.dnsBlocklist,
             launchHook: profileData.launchHook,
+            startupUrl: profileData.startupUrl,
           },
         );
 
@@ -1520,15 +1539,63 @@ export default function Home() {
     void checkSelfHostedSync();
   }, [checkSelfHostedSync]);
 
+  useEffect(() => {
+    if (!isSuperAdmin && currentPage === "company-admin") {
+      setCurrentPage("profiles");
+    }
+  }, [currentPage, isSuperAdmin]);
+
+  const companyAdmins = useMemo(
+    () => companyOverview.users.filter((user) => user.role === "admin"),
+    [companyOverview.users],
+  );
+  const activeCompanyAdmins = useMemo(
+    () => companyAdmins.filter((user) => user.active),
+    [companyAdmins],
+  );
+  const companyAssignments = useMemo(
+    () =>
+      new Map(
+        companyOverview.profiles.map((profile) => [
+          profile.id,
+          profile.assignedUserIds,
+        ]),
+      ),
+    [companyOverview.profiles],
+  );
+  const ordinaryAdminIds = useMemo(
+    () => new Set(companyAdmins.map((admin) => admin.id)),
+    [companyAdmins],
+  );
+  const unassignedProfileCount = useMemo(
+    () =>
+      profiles.filter(
+        (profile) =>
+          !(companyAssignments.get(profile.id) ?? []).some((userId) =>
+            ordinaryAdminIds.has(userId),
+          ),
+      ).length,
+    [companyAssignments, ordinaryAdminIds, profiles],
+  );
+
   // Filter data by selected group and search query
   const filteredProfiles = useMemo(() => {
     let filtered = profiles;
 
-    // Filter by group. "__all__" is a virtual filter that shows every
-    // profile (including ungrouped ones). Any other value is a real
-    // group id; ungrouped profiles only show through "All".
     if (!selectedGroupId || selectedGroupId === "__all__") {
       filtered = profiles;
+    } else if (selectedGroupId.startsWith("__admin__:")) {
+      const adminId = selectedGroupId.slice("__admin__:".length);
+      filtered = profiles.filter((profile) =>
+        (companyAssignments.get(profile.id) ?? []).includes(adminId),
+      );
+    } else if (selectedGroupId === "__unassigned__") {
+      filtered = profiles.filter(
+        (profile) =>
+          !(companyAssignments.get(profile.id) ?? []).some((userId) =>
+            ordinaryAdminIds.has(userId),
+          ),
+      );
     } else {
       filtered = profiles.filter(
         (profile) => profile.group_id === selectedGroupId,
@@ -1554,7 +1621,13 @@ export default function Home() {
     }
 
     return filtered;
-  }, [profiles, selectedGroupId, searchQuery]);
+  }, [
+    profiles,
+    selectedGroupId,
+    searchQuery,
+    companyAssignments,
+    ordinaryAdminIds,
+  ]);
 
   // Update loading states
   const isLoading = profilesLoading || groupsLoading || proxiesLoading;
@@ -1562,9 +1635,11 @@ export default function Home() {
   const subPageTitle =
     currentPage === "profiles"
       ? undefined
-      : currentPage === "import"
-        ? t("pageTitle.import")
-        : t(`pageTitle.${currentPage}`);
+      : currentPage === "company-admin"
+        ? t("companyAdmin.title")
+        : currentPage === "import"
+          ? t("pageTitle.import")
+          : t(`pageTitle.${currentPage}`);
 
   return (
     <div className="flex h-dvh flex-col bg-background font-(family-name:--font-geist-sans)">
@@ -1577,10 +1652,17 @@ export default function Home() {
         totalProfiles={profiles.length}
         selectedGroupId={selectedGroupId}
         onGroupSelect={handleSelectGroup}
+        adminFilters={isSuperAdmin ? companyAdmins : []}
+        showAdminFilters={isSuperAdmin}
+        unassignedCount={unassignedProfileCount}
         pageTitle={subPageTitle}
       />
       <div className="flex min-h-0 flex-1">
-        <RailNav currentPage={currentPage} onNavigate={handleRailNavigate} />
+        <RailNav
+          currentPage={currentPage}
+          onNavigate={handleRailNavigate}
+          isSuperAdmin={isSuperAdmin}
+        />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {currentPage === "profiles" && (
             <div className="flex min-h-0 flex-1 flex-col px-3 pt-2.5">
@@ -1617,6 +1699,9 @@ export default function Home() {
                 onBulkExtensionGroupAssignment={
                   handleBulkExtensionGroupAssignment
                 }
+                onBulkCompanyTransfer={
+                  isSuperAdmin ? () => setCompanyTransferOpen(true) : undefined
+                }
                 onAssignExtensionGroup={handleAssignExtensionGroup}
                 onOpenProfileSyncDialog={handleOpenProfileSyncDialog}
                 onToggleProfileSync={handleToggleProfileSync}
@@ -1632,6 +1717,17 @@ export default function Home() {
 
           {currentPage === "shortcuts" && (
             <ShortcutsPage groupTargets={orderedGroupTargets} />
+          )}
+
+          {currentPage === "company-admin" && isSuperAdmin && (
+            <CompanyAdminPage
+              users={companyOverview.users}
+              isLoading={companyAdminLoading}
+              onRefresh={refreshCompanyAdmin}
+              onCreateAdmin={createAdmin}
+              onSetStatus={setAdminStatus}
+              onResetPassword={resetAdminPassword}
+            />
           )}
 
           {settingsDialogOpen && (
@@ -1735,8 +1831,23 @@ export default function Home() {
           setCreateProfileDialogOpen(false);
         }}
         onCreateProfile={handleCreateProfile}
-        selectedGroupId={selectedGroupId}
+        selectedGroupId={
+          selectedGroupId.startsWith("__") ? "__all__" : selectedGroupId
+        }
         crossOsUnlocked={crossOsUnlocked}
+      />
+
+      <CompanyTransferDialog
+        open={companyTransferOpen}
+        profileIds={selectedProfiles}
+        admins={activeCompanyAdmins}
+        onOpenChange={setCompanyTransferOpen}
+        onTransfer={batchTransferProfiles}
+        onTransferred={async () => {
+          setSelectedProfiles([]);
+          setSelectedGroupId("__all__");
+          await loadProfiles();
+        }}
       />
 
       <CommandPalette

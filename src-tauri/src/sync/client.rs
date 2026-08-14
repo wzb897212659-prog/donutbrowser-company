@@ -1,6 +1,11 @@
 use super::types::*;
 use reqwest::Client;
 
+#[derive(Debug, serde::Deserialize)]
+struct CompanyRevisionResponse {
+  revision: u64,
+}
+
 #[derive(Clone)]
 pub struct SyncClient {
   client: Client,
@@ -19,6 +24,124 @@ impl SyncClient {
 
   fn url(&self, path: &str) -> String {
     format!("{}/v1/objects/{}", self.base_url, path)
+  }
+
+  pub async fn register_company_profile(
+    &self,
+    profile_id: &str,
+    name: &str,
+    browser_version: &str,
+  ) -> SyncResult<()> {
+    if self.base_url != crate::company_auth::COMPANY_SYNC_URL {
+      return Ok(());
+    }
+    let control_url = format!("{}/profiles", crate::company_auth::COMPANY_API_URL);
+    let body = serde_json::json!({
+      "id": profile_id,
+      "name": name,
+      "browserVersion": browser_version,
+    });
+    let response = self
+      .client
+      .post(&control_url)
+      .bearer_auth(&self.token)
+      .json(&body)
+      .send()
+      .await
+      .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+    if response.status().is_success() {
+      return Ok(());
+    }
+    let update = self
+      .client
+      .patch(format!("{control_url}/{profile_id}"))
+      .bearer_auth(&self.token)
+      .json(&body)
+      .send()
+      .await
+      .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+    if !update.status().is_success() {
+      return Err(SyncError::AuthError(format!(
+        "Company profile registration failed ({})",
+        update.status()
+      )));
+    }
+    Ok(())
+  }
+
+  pub fn is_company_sync(&self) -> bool {
+    self.base_url == crate::company_auth::COMPANY_SYNC_URL
+  }
+
+  pub async fn prepare_company_sync(&self, profile_id: &str) -> SyncResult<Option<u64>> {
+    if !self.is_company_sync() {
+      return Ok(None);
+    }
+    let response = self
+      .client
+      .post(format!(
+        "{}/sync/prepare",
+        crate::company_auth::COMPANY_API_URL
+      ))
+      .bearer_auth(&self.token)
+      .json(&serde_json::json!({ "profileId": profile_id, "action": "write" }))
+      .send()
+      .await
+      .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+    if !response.status().is_success() {
+      let status = response.status();
+      let body = response.text().await.unwrap_or_default();
+      return Err(SyncError::AuthError(format!(
+        "Company sync prepare failed ({status}): {body}"
+      )));
+    }
+    let result: CompanyRevisionResponse = response
+      .json()
+      .await
+      .map_err(|e| SyncError::SerializationError(e.to_string()))?;
+    Ok(Some(result.revision))
+  }
+
+  pub async fn commit_company_revision(
+    &self,
+    profile_id: &str,
+    base_revision: u64,
+  ) -> SyncResult<Option<u64>> {
+    if !self.is_company_sync() {
+      return Ok(None);
+    }
+    let response = self
+      .client
+      .post(format!(
+        "{}/sync/commit",
+        crate::company_auth::COMPANY_API_URL
+      ))
+      .bearer_auth(&self.token)
+      .json(&serde_json::json!({
+        "profileId": profile_id,
+        "baseRevision": base_revision,
+      }))
+      .send()
+      .await
+      .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+    if response.status() == reqwest::StatusCode::CONFLICT {
+      let body = response.text().await.unwrap_or_default();
+      return Err(SyncError::ConflictError(format!(
+        "Cloud revision changed during upload: {body}"
+      )));
+    }
+    if !response.status().is_success() {
+      let status = response.status();
+      let body = response.text().await.unwrap_or_default();
+      return Err(SyncError::AuthError(format!(
+        "Company sync commit failed ({status}): {body}"
+      )));
+    }
+    let result: CompanyRevisionResponse = response
+      .json()
+      .await
+      .map_err(|e| SyncError::SerializationError(e.to_string()))?;
+    Ok(Some(result.revision))
   }
 
   pub async fn stat(&self, key: &str) -> SyncResult<StatResponse> {

@@ -12,6 +12,14 @@ use crate::browser::ProxySettings;
 use crate::events;
 use crate::ip_utils;
 
+const IP2REGION_V4_XDB: &[u8] = include_bytes!("../assets/ip2region_v4.xdb");
+type IpGeolocation = (
+  Option<String>,
+  Option<String>,
+  Option<String>,
+  Option<String>,
+);
+
 // Export data format for JSON export
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyExportData {
@@ -84,6 +92,8 @@ pub struct ProxyInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyCheckResult {
   pub ip: String,
+  #[serde(default)]
+  pub province: Option<String>,
   pub city: Option<String>,
   pub country: Option<String>,
   pub country_code: Option<String>,
@@ -272,12 +282,38 @@ impl ProxyManager {
       .as_secs()
   }
 
-  pub async fn get_ip_geolocation(
-    ip: &str,
-  ) -> Result<(Option<String>, Option<String>, Option<String>), String> {
-    // Use ip-api.com (free, no API key required)
+  fn get_offline_ip_geolocation(ip: &str) -> Option<IpGeolocation> {
+    if let Ok(record) = xdb_parse::search_ip(ip, IP2REGION_V4_XDB) {
+      let parts: Vec<&str> = record.split('|').collect();
+      if parts.len() >= 5 {
+        let clean = |value: &str| {
+          let value = value.trim();
+          if value.is_empty() || value == "0" {
+            None
+          } else {
+            Some(value.to_string())
+          }
+        };
+        let country = clean(parts[0]);
+        let province = clean(parts[1]);
+        let city = clean(parts[2]);
+        let country_code = clean(parts[4]).map(|value| value.to_uppercase());
+        if country.is_some() || province.is_some() || city.is_some() {
+          return Some((province, city, country, country_code));
+        }
+      }
+    }
+    None
+  }
+
+  pub async fn get_ip_geolocation(ip: &str) -> Result<IpGeolocation, String> {
+    if let Some(location) = Self::get_offline_ip_geolocation(ip) {
+      return Ok(location);
+    }
+
+    // IPv6 and missing offline records fall back to a Chinese response.
     let url = format!(
-      "http://ip-api.com/json/{}?fields=status,message,country,countryCode,city",
+      "http://ip-api.com/json/{}?fields=status,message,country,countryCode,regionName,city&lang=zh-CN",
       ip
     );
 
@@ -300,19 +336,23 @@ impl ProxyManager {
                   .get("countryCode")
                   .and_then(|v| v.as_str())
                   .map(|s| s.to_string());
+                let province = json
+                  .get("regionName")
+                  .and_then(|v| v.as_str())
+                  .map(|s| s.to_string());
                 let city = json
                   .get("city")
                   .and_then(|v| v.as_str())
                   .map(|s| s.to_string());
-                Ok((city, country, country_code))
+                Ok((province, city, country, country_code))
               } else {
-                Ok((None, None, None))
+                Ok((None, None, None, None))
               }
             }
             Err(e) => Err(format!("Failed to parse geolocation response: {e}")),
           }
         } else {
-          Ok((None, None, None))
+          Ok((None, None, None, None))
         }
       }
       Err(e) => Err(format!("Failed to fetch geolocation: {e}")),
@@ -1114,6 +1154,7 @@ impl ProxyManager {
       Err(e) => {
         let failed_result = ProxyCheckResult {
           ip: String::new(),
+          province: None,
           city: None,
           country: None,
           country_code: None,
@@ -1129,12 +1170,13 @@ impl ProxyManager {
     };
 
     // Get geolocation
-    let (city, country, country_code): (Option<String>, Option<String>, Option<String>) =
+    let (province, city, country, country_code) =
       Self::get_ip_geolocation(&ip).await.unwrap_or_default();
 
     // Create successful result
     let result = ProxyCheckResult {
       ip: ip.clone(),
+      province,
       city,
       country,
       country_code,
@@ -1150,7 +1192,19 @@ impl ProxyManager {
 
   // Get cached proxy check result
   pub fn get_cached_proxy_check(&self, proxy_id: &str) -> Option<ProxyCheckResult> {
-    self.load_proxy_check_cache(proxy_id)
+    let mut cached = self.load_proxy_check_cache(proxy_id)?;
+    if cached.is_valid && cached.province.is_none() {
+      if let Some((province, city, country, country_code)) =
+        Self::get_offline_ip_geolocation(&cached.ip)
+      {
+        cached.province = province;
+        cached.city = city;
+        cached.country = country;
+        cached.country_code = country_code;
+        let _ = self.save_proxy_check_cache(proxy_id, &cached);
+      }
+    }
+    Some(cached)
   }
 
   // Export all proxies as JSON
@@ -1203,6 +1257,11 @@ impl ProxyManager {
   fn parse_single_proxy_line(line: &str) -> ProxyParseResult {
     // Format 1: protocol://username:password@host:port (full URL)
     if let Some(result) = Self::try_parse_url_format(line) {
+      return result;
+    }
+
+    // Format 2: host:port username password (spaces or tabs)
+    if let Some(result) = Self::try_parse_space_separated_format(line) {
       return result;
     }
 
@@ -1289,6 +1348,41 @@ impl ProxyManager {
         reason: format!("Unexpected format with {} parts", parts.len()),
       },
     }
+  }
+
+  fn try_parse_space_separated_format(line: &str) -> Option<ProxyParseResult> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() != 3 {
+      return None;
+    }
+
+    let (host, port_text) = match parts[0].rsplit_once(':') {
+      Some(value) => value,
+      None => {
+        return Some(ProxyParseResult::Invalid {
+          line: line.to_string(),
+          reason: "Expected host:port before username and password".to_string(),
+        });
+      }
+    };
+    let port = match port_text.parse::<u16>() {
+      Ok(port) if !host.trim().is_empty() => port,
+      _ => {
+        return Some(ProxyParseResult::Invalid {
+          line: line.to_string(),
+          reason: "Invalid host or port number".to_string(),
+        });
+      }
+    };
+
+    Some(ProxyParseResult::Parsed(ParsedProxyLine {
+      proxy_type: "http".to_string(),
+      host: host.trim_matches(['[', ']']).to_string(),
+      port,
+      username: Some(parts[1].to_string()),
+      password: Some(parts[2].to_string()),
+      original_line: line.to_string(),
+    }))
   }
 
   // Try to parse URL format: protocol://username:password@host:port
@@ -2264,7 +2358,7 @@ mod tests {
   // Helper function to build donut-proxy binary for testing
   async fn ensure_donut_proxy_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
-    let project_root = PathBuf::from(cargo_manifest_dir)
+    let project_root = PathBuf::from(&cargo_manifest_dir)
       .parent()
       .unwrap()
       .to_path_buf();
@@ -2273,11 +2367,17 @@ mod tests {
     } else {
       "donut-proxy"
     };
-    let proxy_binary = project_root
-      .join("src-tauri")
-      .join("target")
-      .join("debug")
-      .join(proxy_binary_name);
+    let target_dir = env::var_os("CARGO_TARGET_DIR")
+      .map(PathBuf::from)
+      .map(|path| {
+        if path.is_absolute() {
+          path
+        } else {
+          PathBuf::from(&cargo_manifest_dir).join(path)
+        }
+      })
+      .unwrap_or_else(|| project_root.join("src-tauri").join("target"));
+    let proxy_binary = target_dir.join("debug").join(proxy_binary_name);
 
     // Check if binary already exists
     if proxy_binary.exists() {
@@ -2352,6 +2452,19 @@ mod tests {
     );
     assert!(empty_settings.username.is_none(), "Username should be None");
     assert!(empty_settings.password.is_none(), "Password should be None");
+  }
+
+  #[tokio::test]
+  async fn test_china_ip_geolocation_uses_province_and_city_in_chinese() {
+    let (province, city, country, country_code) =
+      ProxyManager::get_ip_geolocation("182.142.168.88")
+        .await
+        .unwrap();
+
+    assert_eq!(province.as_deref(), Some("四川省"));
+    assert_eq!(city.as_deref(), Some("宜宾市"));
+    assert_eq!(country.as_deref(), Some("中国"));
+    assert_eq!(country_code.as_deref(), Some("CN"));
   }
 
   #[tokio::test]
@@ -3421,6 +3534,19 @@ mod tests {
         assert_eq!(p.password.as_deref(), Some("secret"));
       }
       _ => panic!("Expected Parsed"),
+    }
+
+    // host:port username password format (spaces)
+    let results = ProxyManager::parse_txt_proxies("115.231.39.11:21268 demo-user demo-pass\n");
+    match &results[0] {
+      ProxyParseResult::Parsed(p) => {
+        assert_eq!(p.proxy_type, "http");
+        assert_eq!(p.host, "115.231.39.11");
+        assert_eq!(p.port, 21268);
+        assert_eq!(p.username.as_deref(), Some("demo-user"));
+        assert_eq!(p.password.as_deref(), Some("demo-pass"));
+      }
+      _ => panic!("Expected space-separated proxy to be parsed"),
     }
 
     // Comments and empty lines should be skipped

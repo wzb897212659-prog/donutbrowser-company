@@ -71,6 +71,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tauri_plugin_updater::UpdaterExt;
 
 #[cfg(target_os = "linux")]
 #[derive(Debug, Clone)]
@@ -1942,7 +1943,9 @@ rm "{}"
 // Tauri commands
 
 #[tauri::command]
-pub async fn check_for_app_updates() -> Result<Option<AppUpdateInfo>, String> {
+pub async fn check_for_app_updates(
+  app_handle: tauri::AppHandle,
+) -> Result<Option<AppUpdateInfo>, String> {
   if crate::app_dirs::is_portable() {
     log::info!("App auto-updates disabled in portable mode");
     return Ok(None);
@@ -1957,11 +1960,7 @@ pub async fn check_for_app_updates() -> Result<Option<AppUpdateInfo>, String> {
     return Ok(None);
   }
 
-  let updater = AppAutoUpdater::instance();
-  updater
-    .check_for_updates()
-    .await
-    .map_err(|e| format!("Failed to check for app updates: {e}"))
+  check_signed_company_update(app_handle).await
 }
 
 #[tauri::command]
@@ -1969,20 +1968,43 @@ pub async fn download_and_prepare_app_update(
   app_handle: tauri::AppHandle,
   update_info: AppUpdateInfo,
 ) -> Result<(), String> {
-  let updater = AppAutoUpdater::instance();
-  updater
-    .download_and_prepare_update(&app_handle, &update_info)
+  let update = app_handle
+    .updater()
+    .map_err(|e| format!("Failed to initialize signed updater: {e}"))?
+    .check()
     .await
-    .map_err(|e| {
-      let msg = e.to_string();
-      // Structured error codes (`{"code": ...}`) must reach the frontend
-      // unwrapped so translateBackendError can resolve them.
-      if msg.starts_with('{') {
-        msg
-      } else {
-        format!("Failed to download and prepare app update: {msg}")
-      }
-    })
+    .map_err(|e| format!("Failed to check signed update: {e}"))?
+    .ok_or_else(|| "The signed update is no longer available".to_string())?;
+  if update.version != update_info.new_version {
+    return Err("The available update changed; check for updates again".to_string());
+  }
+
+  let mut downloaded = 0_u64;
+  update
+    .download_and_install(
+      |chunk_length, content_length| {
+        downloaded += chunk_length as u64;
+        let percentage = content_length
+          .filter(|total| *total > 0)
+          .map(|total| downloaded.saturating_mul(100) / total)
+          .unwrap_or(0);
+        let _ = events::emit(
+          "app-update-progress",
+          serde_json::json!({
+            "stage": "downloading",
+            "percentage": percentage,
+            "message": "Downloading and verifying signed update"
+          }),
+        );
+      },
+      || {},
+    )
+    .await
+    .map_err(|e| format!("Signed update verification or installation failed: {e}"))?;
+
+  events::emit("app-update-ready", update_info.new_version)
+    .map_err(|e| format!("Failed to notify update completion: {e}"))?;
+  Ok(())
 }
 
 #[tauri::command]
@@ -1995,13 +2017,39 @@ pub async fn restart_application() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn check_for_app_updates_manual() -> Result<Option<AppUpdateInfo>, String> {
+pub async fn check_for_app_updates_manual(
+  app_handle: tauri::AppHandle,
+) -> Result<Option<AppUpdateInfo>, String> {
   log::info!("Manual app update check triggered");
-  let updater = AppAutoUpdater::instance();
-  updater
-    .check_for_updates()
+  check_signed_company_update(app_handle).await
+}
+
+async fn check_signed_company_update(
+  app_handle: tauri::AppHandle,
+) -> Result<Option<AppUpdateInfo>, String> {
+  let Some(update) = app_handle
+    .updater()
+    .map_err(|e| format!("Failed to initialize signed updater: {e}"))?
+    .check()
     .await
-    .map_err(|e| format!("Failed to check for app updates: {e}"))
+    .map_err(|e| format!("Failed to check signed update: {e}"))?
+  else {
+    return Ok(None);
+  };
+
+  Ok(Some(AppUpdateInfo {
+    current_version: app_handle.package_info().version.to_string(),
+    new_version: update.version.clone(),
+    release_notes: update.body.clone().unwrap_or_default(),
+    download_url: String::new(),
+    is_nightly: false,
+    published_at: update.date.map(|date| date.to_string()).unwrap_or_default(),
+    manual_update_required: false,
+    release_page_url: None,
+    repo_update: false,
+    checksums_url: None,
+    asset_digest: None,
+  }))
 }
 
 #[cfg(test)]

@@ -403,6 +403,7 @@ impl SyncScheduler {
     for profile_id in to_sync {
       let app = app_handle.clone();
       let in_flight = self.in_flight_profiles.clone();
+      let pending_profiles = self.pending_profiles.clone();
       sync_set.spawn(async move {
         log::info!("Executing queued sync for profile {}", profile_id);
         let _ = events::emit(
@@ -451,6 +452,35 @@ impl SyncScheduler {
                 "status": "synced"
               }),
             );
+          }
+          Err(super::types::SyncError::ConflictError(message))
+            if message.contains("PROFILE_LOCKED") =>
+          {
+            // A different computer may be finishing a launch or upload for the
+            // same profile. This is normal lease contention, not a failed sync.
+            // Keep the UI in a waiting state and retry after the current holder
+            // has had time to release its lease.
+            log::info!(
+              "Profile {} is temporarily locked by another device; retrying sync shortly",
+              profile_id
+            );
+            let _ = events::emit(
+              "profile-sync-status",
+              serde_json::json!({
+                "profile_id": profile_id,
+                "status": "waiting"
+              }),
+            );
+            tokio::spawn(async move {
+              sleep(Duration::from_secs(10)).await;
+              pending_profiles.lock().await.insert(
+                profile_id,
+                ProfileStopTime {
+                  stopped_at: Instant::now(),
+                  queued: true,
+                },
+              );
+            });
           }
           Err(e) => {
             log::error!("Failed to sync profile {}: {}", profile_id, e);

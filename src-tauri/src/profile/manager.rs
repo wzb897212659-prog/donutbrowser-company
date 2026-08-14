@@ -66,6 +66,25 @@ impl ProfileManager {
     }
   }
 
+  fn normalize_startup_url(
+    startup_url: Option<String>,
+  ) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let Some(raw) = startup_url else {
+      return Ok(None);
+    };
+
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+      return Ok(None);
+    }
+
+    let parsed = Url::parse(trimmed).map_err(|e| format!("Invalid startup URL: {e}"))?;
+    match parsed.scheme() {
+      "http" | "https" => Ok(Some(parsed.to_string())),
+      _ => Err("Startup URL must use http or https".into()),
+    }
+  }
+
   #[allow(clippy::too_many_arguments)]
   pub async fn create_profile_with_group(
     &self,
@@ -81,6 +100,7 @@ impl ProfileManager {
     ephemeral: bool,
     dns_blocklist: Option<String>,
     launch_hook: Option<String>,
+    startup_url: Option<String>,
   ) -> Result<BrowserProfile, Box<dyn std::error::Error>> {
     if name.trim().is_empty() {
       return Err(
@@ -95,6 +115,7 @@ impl ProfileManager {
     }
 
     let launch_hook = Self::normalize_launch_hook(launch_hook)?;
+    let startup_url = Self::normalize_startup_url(startup_url)?;
 
     // Sync cloud proxy credentials if the profile uses a cloud or cloud-derived proxy
     if let Some(ref pid) = proxy_id {
@@ -194,6 +215,7 @@ impl ProfileManager {
           proxy_id: proxy_id.clone(),
           vpn_id: None,
           launch_hook: launch_hook.clone(),
+          startup_url: startup_url.clone(),
           process_id: None,
           last_launch: None,
           release_type: release_type.to_string(),
@@ -278,6 +300,7 @@ impl ProfileManager {
       proxy_id: proxy_id.clone(),
       vpn_id: vpn_id.clone(),
       launch_hook,
+      startup_url,
       process_id: None,
       last_launch: None,
       release_type: release_type.to_string(),
@@ -810,6 +833,30 @@ impl ProfileManager {
     Ok(profile)
   }
 
+  pub fn update_profile_startup_url(
+    &self,
+    _app_handle: &tauri::AppHandle,
+    profile_id: &str,
+    startup_url: Option<String>,
+  ) -> Result<BrowserProfile, Box<dyn std::error::Error>> {
+    let profile_uuid =
+      uuid::Uuid::parse_str(profile_id).map_err(|_| format!("Invalid profile ID: {profile_id}"))?;
+    let profiles = self.list_profiles()?;
+    let mut profile = profiles
+      .into_iter()
+      .find(|p| p.id == profile_uuid)
+      .ok_or_else(|| format!("Profile with ID '{profile_id}' not found"))?;
+
+    profile.startup_url = Self::normalize_startup_url(startup_url)?;
+    profile.updated_at = Some(crate::proxy_manager::now_secs());
+    self.save_profile(&profile)?;
+    crate::sync::queue_profile_sync_if_eligible(&profile);
+    if let Err(e) = events::emit("profile-updated", &profile) {
+      log::warn!("Warning: Failed to emit profile update event: {e}");
+    }
+    Ok(profile)
+  }
+
   pub fn update_profile_proxy_bypass_rules(
     &self,
     _app_handle: &tauri::AppHandle,
@@ -991,6 +1038,7 @@ impl ProfileManager {
       proxy_id: source.proxy_id,
       vpn_id: source.vpn_id,
       launch_hook: source.launch_hook,
+      startup_url: source.startup_url,
       process_id: None,
       last_launch: None,
       release_type: source.release_type,
@@ -1630,6 +1678,31 @@ mod tests {
     let result_none = super::validate_launch_hook(None).unwrap();
     assert!(result_none.is_none());
   }
+
+  #[test]
+  fn test_normalize_startup_url_accepts_http_and_https() {
+    let http =
+      ProfileManager::normalize_startup_url(Some(" http://localhost:3000/start ".to_string()))
+        .unwrap();
+    let https =
+      ProfileManager::normalize_startup_url(Some("https://example.com/home".to_string())).unwrap();
+
+    assert_eq!(http.as_deref(), Some("http://localhost:3000/start"));
+    assert_eq!(https.as_deref(), Some("https://example.com/home"));
+  }
+
+  #[test]
+  fn test_validate_startup_url_rejects_non_http_scheme_with_code() {
+    let err = super::validate_startup_url(Some("file:///C:/secret.txt")).unwrap_err();
+    let parsed: serde_json::Value = serde_json::from_str(&err).expect("error must be JSON");
+    assert_eq!(parsed["code"], "INVALID_STARTUP_URL");
+  }
+
+  #[test]
+  fn test_validate_startup_url_empty_clears_url() {
+    assert!(super::validate_startup_url(None).unwrap().is_none());
+    assert!(super::validate_startup_url(Some("   ")).unwrap().is_none());
+  }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1647,9 +1720,10 @@ pub async fn create_browser_profile_with_group(
   ephemeral: bool,
   dns_blocklist: Option<String>,
   launch_hook: Option<String>,
+  startup_url: Option<String>,
 ) -> Result<BrowserProfile, String> {
   let profile_manager = ProfileManager::instance();
-  profile_manager
+  let profile = profile_manager
     .create_profile_with_group(
       &app_handle,
       &name,
@@ -1663,17 +1737,55 @@ pub async fn create_browser_profile_with_group(
       ephemeral,
       dns_blocklist,
       launch_hook,
+      startup_url,
     )
     .await
-    .map_err(|e| crate::wrap_backend_error(e, "Failed to create profile"))
+    .map_err(|e| crate::wrap_backend_error(e, "Failed to create profile"))?;
+  if let Err(error) = crate::company_auth::COMPANY_AUTH
+    .register_profile(
+      &app_handle,
+      &profile.id.to_string(),
+      &profile.name,
+      &profile.version,
+    )
+    .await
+  {
+    // Profile creation is a local filesystem operation, while company
+    // registration is remote. Do not leave an unassigned local profile behind
+    // when the second step fails: it would be hidden by the company ACL but
+    // would still reserve its name and make the next create attempt fail.
+    if let Err(cleanup_error) = profile_manager.delete_profile_local_only(&profile.id.to_string()) {
+      log::error!(
+        "Failed to roll back local profile {} after company registration failed: {}",
+        profile.id,
+        cleanup_error
+      );
+    }
+    return Err(error);
+  }
+  Ok(profile)
 }
 
 #[tauri::command]
-pub fn list_browser_profiles() -> Result<Vec<BrowserProfile>, String> {
+pub async fn list_browser_profiles(
+  app_handle: tauri::AppHandle,
+) -> Result<Vec<BrowserProfile>, String> {
   let profile_manager = ProfileManager::instance();
-  profile_manager
+  let profiles = profile_manager
     .list_profiles()
-    .map_err(|e| format!("Failed to list profiles: {e}"))
+    .map_err(|e| format!("Failed to list profiles: {e}"))?;
+  let Some(visible_ids) = crate::company_auth::COMPANY_AUTH
+    .visible_profile_ids(&app_handle)
+    .await?
+  else {
+    return Ok(profiles);
+  };
+  Ok(
+    profiles
+      .into_iter()
+      .filter(|profile| visible_ids.contains(&profile.id.to_string()))
+      .collect(),
+  )
 }
 
 #[tauri::command]
@@ -1758,6 +1870,24 @@ pub(crate) fn validate_launch_hook(launch_hook: Option<&str>) -> Result<Option<S
   Ok(Some(trimmed.to_string()))
 }
 
+pub(crate) fn validate_startup_url(startup_url: Option<&str>) -> Result<Option<String>, String> {
+  let Some(raw) = startup_url else {
+    return Ok(None);
+  };
+  let trimmed = raw.trim();
+  if trimmed.is_empty() {
+    return Ok(None);
+  }
+  let ok = url::Url::parse(trimmed)
+    .ok()
+    .map(|u| matches!(u.scheme(), "http" | "https"))
+    .unwrap_or(false);
+  if !ok {
+    return Err(serde_json::json!({ "code": "INVALID_STARTUP_URL" }).to_string());
+  }
+  Ok(Some(trimmed.to_string()))
+}
+
 #[tauri::command]
 pub fn update_profile_launch_hook(
   app_handle: tauri::AppHandle,
@@ -1769,6 +1899,18 @@ pub fn update_profile_launch_hook(
   profile_manager
     .update_profile_launch_hook(&app_handle, &profile_id, launch_hook)
     .map_err(|e| format!("Failed to update profile launch hook: {e}"))
+}
+
+#[tauri::command]
+pub fn update_profile_startup_url(
+  app_handle: tauri::AppHandle,
+  profile_id: String,
+  startup_url: Option<String>,
+) -> Result<BrowserProfile, String> {
+  validate_startup_url(startup_url.as_deref())?;
+  ProfileManager::instance()
+    .update_profile_startup_url(&app_handle, &profile_id, startup_url)
+    .map_err(|e| format!("Failed to update profile startup URL: {e}"))
 }
 
 #[tauri::command]
@@ -1833,6 +1975,7 @@ pub async fn create_browser_profile_new(
   ephemeral: Option<bool>,
   dns_blocklist: Option<String>,
   launch_hook: Option<String>,
+  startup_url: Option<String>,
 ) -> Result<BrowserProfile, String> {
   let fingerprint_os = wayfern_config.as_ref().and_then(|c| c.os.as_deref());
 
@@ -1862,6 +2005,7 @@ pub async fn create_browser_profile_new(
     ephemeral.unwrap_or(false),
     dns_blocklist,
     launch_hook,
+    startup_url,
   )
   .await
 }
@@ -1895,14 +2039,59 @@ pub async fn update_wayfern_config(
 }
 
 #[tauri::command]
-pub fn clone_profile(profile_id: String, name: Option<String>) -> Result<BrowserProfile, String> {
-  ProfileManager::instance()
+pub async fn clone_profile(
+  app_handle: tauri::AppHandle,
+  profile_id: String,
+  name: Option<String>,
+) -> Result<BrowserProfile, String> {
+  let profile = ProfileManager::instance()
     .clone_profile(&profile_id, name)
-    .map_err(|e| format!("Failed to clone profile: {e}"))
+    .map_err(|e| format!("Failed to clone profile: {e}"))?;
+  if let Err(error) = crate::company_auth::COMPANY_AUTH
+    .register_profile(
+      &app_handle,
+      &profile.id.to_string(),
+      &profile.name,
+      &profile.version,
+    )
+    .await
+  {
+    if let Err(cleanup_error) =
+      ProfileManager::instance().delete_profile_local_only(&profile.id.to_string())
+    {
+      log::error!(
+        "Failed to roll back local clone {} after company registration failed: {}",
+        profile.id,
+        cleanup_error
+      );
+    }
+    return Err(error);
+  }
+  Ok(profile)
 }
 
 #[tauri::command]
-pub fn delete_profile(app_handle: tauri::AppHandle, profile_id: String) -> Result<(), String> {
+pub async fn delete_profile(
+  app_handle: tauri::AppHandle,
+  profile_id: String,
+) -> Result<(), String> {
+  if crate::company_auth::COMPANY_AUTH.is_logged_in().await {
+    let profile = ProfileManager::instance()
+      .list_profiles()
+      .map_err(|e| format!("Failed to list profiles: {e}"))?
+      .into_iter()
+      .find(|profile| profile.id.to_string() == profile_id)
+      .ok_or_else(|| "Profile not found".to_string())?;
+    if profile.process_id.is_some() {
+      return Err("Cannot delete profile while browser is running".to_string());
+    }
+    crate::company_auth::COMPANY_AUTH
+      .soft_delete_profile(&app_handle, &profile_id)
+      .await?;
+    return ProfileManager::instance()
+      .delete_profile_local_only(&profile_id)
+      .map_err(|e| format!("Failed to delete local profile: {e}"));
+  }
   ProfileManager::instance()
     .delete_profile(&app_handle, &profile_id)
     .map_err(|e| format!("Failed to delete profile: {e}"))

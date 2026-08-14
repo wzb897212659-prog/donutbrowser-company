@@ -1,0 +1,8 @@
+{
+  "registry-mirrors": ["https://mirror.ccs.tencentyun.com"],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}

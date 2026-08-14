@@ -624,7 +624,7 @@ export function ProxyManagementDialog({
       },
       {
         id: "actions",
-        size: 144,
+        size: 220,
         enableSorting: false,
         header: () => t("common.labels.actions"),
         cell: ({ row }) => {

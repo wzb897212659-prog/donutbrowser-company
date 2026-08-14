@@ -381,7 +381,12 @@
       "description": "디스크에 저장된 프로필 데이터를 암호화합니다. 실행하려면 필요합니다."
     },
     "downloadingSubtitle": "다운로드 중…",
-    "browsersDownloading": "브라우저를 아직 다운로드하는 중입니다. 다운로드가 완료되면 프로필을 만들 수 있습니다."
+    "browsersDownloading": "브라우저를 아직 다운로드하는 중입니다. 다운로드가 완료되면 프로필을 만들 수 있습니다.",
+    "startupUrl": {
+      "label": "Startup page URL",
+      "description": "Open this page automatically when the profile starts.",
+      "placeholder": "https://example.com"
+    }
   },
   "deleteDialog": {
     "title": "프로필 삭제",
@@ -429,6 +434,11 @@
     "noProxies": "구성된 프록시가 없습니다",
     "noProxiesDescription": "브라우저 트래픽을 라우팅할 프록시를 추가하세요.",
     "form": {
+      "quickInput": "Paste proxy details",
+      "quickInputPlaceholder": "IP:port username password",
+      "quickInputHint": "Spaces and tabs are supported. Pasting fills the fields below.",
+      "quickInputInvalid": "Could not recognize the proxy format",
+      "quickInputRecognized": "Proxy details filled automatically",
       "name": "이름",
       "namePlaceholder": "프록시 이름 입력",
       "type": "유형",
@@ -633,6 +643,12 @@
       "linkCodeLabel": "로그인 코드",
       "linkCodePlaceholder": "웹사이트에서 받은 코드를 붙여넣으세요",
       "signInTitle": "로그인",
+      "companyLoginInstructions": "Sign in with your company browser account.",
+      "username": "Username",
+      "usernamePlaceholder": "Enter your username",
+      "password": "Password",
+      "passwordPlaceholder": "Enter your password",
+      "companyLogin": "Sign in",
       "verifyAndLogin": "확인 및 로그인",
       "loggingIn": "로그인 중...",
       "connected": "연결됨",
@@ -1167,7 +1183,8 @@
       "security": "보안",
       "delete": "프로필 삭제",
       "activity": "활동",
-      "launchHook": "실행 후크"
+      "launchHook": "실행 후크",
+      "launchSettings": "Launch settings"
     },
     "sectionDesc": {
       "fingerprint": "이 프로필이 핑거프린팅 스크립트에 어떻게 표시되는지 구성합니다.",
@@ -1202,6 +1219,12 @@
       "syncing": "동기화 중",
       "synced": "동기화됨",
       "error": "오류"
+    },
+    "startupUrl": {
+      "label": "Startup page URL",
+      "description": "Open this page automatically when the profile starts.",
+      "placeholder": "https://example.com",
+      "invalidUrlHint": "Enter a complete HTTP or HTTPS URL."
     }
   },
   "extensions": {
@@ -1802,7 +1825,8 @@
     "updateChecksumsUnavailable": "업데이트 {{version}}의 체크섬 파일을 가져올 수 없어 검증하지 못했습니다. 업데이트가 설치되지 않았으며 나중에 다시 시도됩니다.",
     "updateChecksumMismatch": "다운로드한 업데이트 파일 {{file}}이(가) 체크섬 검증에 실패하여 삭제되었습니다. 다시 시도해 주세요.",
     "nameCannotBeEmpty": "이름은 비워둘 수 없습니다",
-    "wayfernVersionNotAvailable": "Wayfern 버전 {{requested}}은(는) 다운로드할 수 없습니다. 현재 버전은 {{current}}입니다."
+    "wayfernVersionNotAvailable": "Wayfern 버전 {{requested}}은(는) 다운로드할 수 없습니다. 현재 버전은 {{current}}입니다.",
+    "invalidStartupUrl": "Enter a valid startup page URL beginning with http:// or https://."
   },
   "rail": {
     "profiles": "프로필",
@@ -2017,6 +2041,56 @@
     "invalidFingerprintDescription": "핑거프린트 구성에 잘못된 JSON이 포함되어 있습니다. 고급 설정을 확인하세요.",
     "saveFailed": "구성 저장 실패",
     "unknownError": "알 수 없는 오류가 발생했습니다"
+  },
+  "companyAdmin": {
+    "title": "Account management",
+    "description": "Create administrators, manage access, and review assigned profiles.",
+    "createAdmin": "New administrator",
+    "username": "Username",
+    "role": "Role",
+    "profileCount": "Profiles",
+    "createdAt": "Created",
+    "roles": {
+      "admin": "Administrator",
+      "superAdmin": "Super administrator"
+    },
+    "createTitle": "Create administrator",
+    "createDescription": "Create a normal administrator account for company profile access.",
+    "password": "New password",
+    "confirmPassword": "Confirm password",
+    "passwordTooShort": "Password must be at least 12 characters.",
+    "passwordMismatch": "The two passwords do not match.",
+    "createSuccess": "Administrator created.",
+    "resetPassword": "Reset password",
+    "resetTitle": "Reset administrator password",
+    "resetDescription": "Set a new password for {{username}}. Their existing sessions will be revoked.",
+    "resetSuccess": "Password reset. Existing sessions have been revoked.",
+    "enableSuccess": "Administrator enabled.",
+    "disableSuccess": "Administrator disabled.",
+    "disabledFilter": "{{username}} (disabled)",
+    "unassigned": "Unassigned",
+    "transferAction": "Transfer to administrator",
+    "transferTitle": "Transfer selected profiles",
+    "transferDescription": "Transfer {{count}} selected profile(s) to one administrator.",
+    "transferTarget": "Target administrator",
+    "selectAdmin": "Select an administrator",
+    "transferWarning": "The previous administrators will lose access. Profiles currently in use cannot be transferred.",
+    "transferConfirm": "Confirm transfer",
+    "transferSuccess": "Transferred {{count}} profile(s).",
+    "errors": {
+      "notLoggedIn": "Sign in to the company account first.",
+      "superAdminRequired": "Only a super administrator can perform this action.",
+      "requestFailed": "The company management request failed. Please try again.",
+      "invalidResponse": "The company server returned an invalid response.",
+      "invalidUsername": "Username must be 3-64 characters and use letters, numbers, dots, underscores, or hyphens.",
+      "passwordTooLong": "Password cannot exceed 256 characters.",
+      "usernameExists": "This username already exists.",
+      "userNotFound": "Administrator account not found.",
+      "superAdminPasswordResetForbidden": "Super administrator passwords cannot be reset here.",
+      "invalidBatchTransfer": "Select between 1 and 500 valid profiles to transfer.",
+      "activeAdminNotFound": "The target administrator does not exist or is disabled.",
+      "profilesLocked": "{{count}} selected profile(s) are currently in use. Close them before transferring."
+    }
   },
   "cookieCopy": {
     "noOtherTargets": "선택된 다른 Wayfern 프로필이 없습니다"

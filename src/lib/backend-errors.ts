@@ -17,6 +17,7 @@ export type BackendErrorCode =
   | "INVALID_PROFILE_ID"
   | "PASSWORD_TOO_SHORT"
   | "INVALID_LAUNCH_HOOK_URL"
+  | "INVALID_STARTUP_URL"
   | "COOKIE_DB_LOCKED"
   | "COOKIE_DB_UNAVAILABLE"
   | "SELF_HOSTED_REQUIRES_LOGOUT"
@@ -38,6 +39,23 @@ export type BackendErrorCode =
   | "CAMOUFOX_IMPORT_DEPRECATED"
   | "UPDATE_CHECKSUMS_UNAVAILABLE"
   | "UPDATE_CHECKSUM_MISMATCH"
+  | "COMPANY_NOT_LOGGED_IN"
+  | "COMPANY_SUPER_ADMIN_REQUIRED"
+  | "COMPANY_ADMIN_REQUEST_FAILED"
+  | "COMPANY_ADMIN_INVALID_RESPONSE"
+  | "COMPANY_ADMIN_CREATE_FAILED"
+  | "COMPANY_ADMIN_STATUS_FAILED"
+  | "COMPANY_ADMIN_PASSWORD_FAILED"
+  | "COMPANY_BATCH_TRANSFER_FAILED"
+  | "INVALID_USERNAME"
+  | "PASSWORD_TOO_LONG"
+  | "USERNAME_EXISTS"
+  | "USER_NOT_FOUND"
+  | "SUPER_ADMIN_PASSWORD_RESET_FORBIDDEN"
+  | "INVALID_BATCH_TRANSFER"
+  | "ACTIVE_ADMIN_NOT_FOUND"
+  | "PROFILES_LOCKED"
+  | "FORBIDDEN"
   | "INTERNAL_ERROR";
 
 export interface BackendError {
@@ -108,6 +126,8 @@ export function translateBackendError(t: TFunction, err: unknown): string {
     }
     case "INVALID_LAUNCH_HOOK_URL":
       return t("backendErrors.invalidLaunchHookUrl");
+    case "INVALID_STARTUP_URL":
+      return t("backendErrors.invalidStartupUrl");
     case "COOKIE_DB_LOCKED":
       return t("backendErrors.cookieDbLocked");
     case "COOKIE_DB_UNAVAILABLE":
@@ -156,6 +176,37 @@ export function translateBackendError(t: TFunction, err: unknown): string {
     case "UPDATE_CHECKSUM_MISMATCH":
       return t("backendErrors.updateChecksumMismatch", {
         file: parsed.params?.file ?? "",
+      });
+    case "COMPANY_NOT_LOGGED_IN":
+      return t("companyAdmin.errors.notLoggedIn");
+    case "COMPANY_SUPER_ADMIN_REQUIRED":
+    case "FORBIDDEN":
+      return t("companyAdmin.errors.superAdminRequired");
+    case "COMPANY_ADMIN_REQUEST_FAILED":
+    case "COMPANY_ADMIN_CREATE_FAILED":
+    case "COMPANY_ADMIN_STATUS_FAILED":
+    case "COMPANY_ADMIN_PASSWORD_FAILED":
+    case "COMPANY_BATCH_TRANSFER_FAILED":
+      return t("companyAdmin.errors.requestFailed");
+    case "COMPANY_ADMIN_INVALID_RESPONSE":
+      return t("companyAdmin.errors.invalidResponse");
+    case "INVALID_USERNAME":
+      return t("companyAdmin.errors.invalidUsername");
+    case "PASSWORD_TOO_LONG":
+      return t("companyAdmin.errors.passwordTooLong");
+    case "USERNAME_EXISTS":
+      return t("companyAdmin.errors.usernameExists");
+    case "USER_NOT_FOUND":
+      return t("companyAdmin.errors.userNotFound");
+    case "SUPER_ADMIN_PASSWORD_RESET_FORBIDDEN":
+      return t("companyAdmin.errors.superAdminPasswordResetForbidden");
+    case "INVALID_BATCH_TRANSFER":
+      return t("companyAdmin.errors.invalidBatchTransfer");
+    case "ACTIVE_ADMIN_NOT_FOUND":
+      return t("companyAdmin.errors.activeAdminNotFound");
+    case "PROFILES_LOCKED":
+      return t("companyAdmin.errors.profilesLocked", {
+        count: parsed.params?.count ?? "0",
       });
     case "INTERNAL_ERROR":
       return t("backendErrors.internal", {

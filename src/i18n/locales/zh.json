@@ -381,7 +381,12 @@
       "description": "加密磁盘上的配置文件数据。启动时需要密码。"
     },
     "downloadingSubtitle": "正在下载…",
-    "browsersDownloading": "浏览器仍在下载中。下载完成后即可创建配置文件。"
+    "browsersDownloading": "浏览器仍在下载中。下载完成后即可创建配置文件。",
+    "startupUrl": {
+      "label": "启动页面 URL",
+      "description": "启动环境时自动打开此页面。",
+      "placeholder": "https://example.com"
+    }
   },
   "deleteDialog": {
     "title": "删除配置文件",
@@ -429,6 +434,11 @@
     "noProxies": "未配置代理",
     "noProxiesDescription": "添加代理以通过它路由浏览器流量。",
     "form": {
+      "quickInput": "粘贴代理信息",
+      "quickInputPlaceholder": "IP:端口 用户名 密码",
+      "quickInputHint": "支持空格或 Tab 分隔，粘贴后自动填写下方字段。",
+      "quickInputInvalid": "未能识别代理格式，请检查 IP、端口、用户名和密码",
+      "quickInputRecognized": "代理信息已自动填写",
       "name": "名称",
       "namePlaceholder": "输入代理名称",
       "type": "类型",
@@ -633,6 +643,12 @@
       "linkCodeLabel": "登录代码",
       "linkCodePlaceholder": "粘贴网站的代码",
       "signInTitle": "登录",
+      "companyLoginInstructions": "使用公司浏览器账号登录。",
+      "username": "用户名",
+      "usernamePlaceholder": "请输入用户名",
+      "password": "密码",
+      "passwordPlaceholder": "请输入密码",
+      "companyLogin": "登录",
       "verifyAndLogin": "验证并登录",
       "loggingIn": "登录中...",
       "connected": "已连接",
@@ -1167,7 +1183,8 @@
       "security": "安全",
       "delete": "删除配置文件",
       "activity": "活动",
-      "launchHook": "启动钩子"
+      "launchHook": "启动钩子",
+      "launchSettings": "启动设置"
     },
     "sectionDesc": {
       "fingerprint": "配置此配置文件如何对指纹脚本显示。",
@@ -1202,6 +1219,12 @@
       "syncing": "同步中",
       "synced": "已同步",
       "error": "错误"
+    },
+    "startupUrl": {
+      "label": "启动页面 URL",
+      "description": "启动环境时自动打开此页面。",
+      "placeholder": "https://example.com",
+      "invalidUrlHint": "请输入完整的 HTTP 或 HTTPS URL。"
     }
   },
   "extensions": {
@@ -1802,7 +1825,20 @@
     "updateChecksumsUnavailable": "无法验证更新 {{version}}：无法获取其校验和文件。更新未安装，稍后将重试。",
     "updateChecksumMismatch": "下载的更新文件 {{file}} 未通过校验和验证，已被丢弃。请重试。",
     "nameCannotBeEmpty": "名称不能为空",
-    "wayfernVersionNotAvailable": "Wayfern 版本 {{requested}} 无法下载。当前版本为 {{current}}。"
+    "wayfernVersionNotAvailable": "Wayfern 版本 {{requested}} 无法下载。当前版本为 {{current}}。",
+    "invalidStartupUrl": "请输入以 http:// 或 https:// 开头的有效启动页面 URL。",
+    "companyNotLoggedIn": "请先登录公司账号。",
+    "companySuperAdminRequired": "只有超级管理员可以执行此操作。",
+    "companyAdminRequestFailed": "公司账号管理请求失败，请重试。",
+    "companyAdminInvalidResponse": "公司服务器返回了无效数据。",
+    "invalidUsername": "用户名需为3至64位，只能包含字母、数字、点、下划线或短横线。",
+    "passwordTooLong": "密码不能超过256位。",
+    "usernameExists": "该用户名已存在。",
+    "userNotFound": "未找到管理员账号。",
+    "superAdminPasswordResetForbidden": "不能在此重置超级管理员密码。",
+    "invalidBatchTransfer": "请选择1至500个有效环境进行转移。",
+    "activeAdminNotFound": "目标管理员不存在或已停用。",
+    "profilesLocked": "所选环境中有 {{count}} 个正在使用，请关闭后再转移。"
   },
   "rail": {
     "profiles": "配置文件",
@@ -1819,7 +1855,8 @@
     },
     "network": "网络",
     "integrations": "集成",
-    "account": "账号"
+    "account": "账号",
+    "companyAdmin": "账号管理"
   },
   "pageTitle": {
     "proxies": "网络",
@@ -1830,7 +1867,8 @@
     "integrations": "集成",
     "account": "账户",
     "import": "导入配置文件",
-    "shortcuts": "键盘快捷键"
+    "shortcuts": "键盘快捷键",
+    "company-admin": "账号管理"
   },
   "encryption": {
     "required": {
@@ -2020,5 +2058,55 @@
   },
   "cookieCopy": {
     "noOtherTargets": "未选择其他 Wayfern 配置文件"
+  },
+  "companyAdmin": {
+    "title": "账号管理",
+    "description": "新建管理员、管理账号状态并查看名下环境。",
+    "createAdmin": "新建管理员",
+    "username": "用户名",
+    "role": "角色",
+    "profileCount": "环境数量",
+    "createdAt": "创建时间",
+    "roles": {
+      "admin": "普通管理员",
+      "superAdmin": "超级管理员"
+    },
+    "createTitle": "新建普通管理员",
+    "createDescription": "创建用于访问公司环境的普通管理员账号。",
+    "password": "新密码",
+    "confirmPassword": "确认密码",
+    "passwordTooShort": "密码至少需要12位。",
+    "passwordMismatch": "两次输入的密码不一致。",
+    "createSuccess": "管理员创建成功。",
+    "resetPassword": "重置密码",
+    "resetTitle": "重置管理员密码",
+    "resetDescription": "为 {{username}} 设置新密码，保存后其现有会话将被撤销。",
+    "resetSuccess": "密码已重置，原有会话已撤销。",
+    "enableSuccess": "管理员已启用。",
+    "disableSuccess": "管理员已停用。",
+    "disabledFilter": "{{username}}（已停用）",
+    "unassigned": "未分配",
+    "transferAction": "转移到管理员",
+    "transferTitle": "转移所选环境",
+    "transferDescription": "将所选 {{count}} 个环境独占转移给一个普通管理员。",
+    "transferTarget": "目标管理员",
+    "selectAdmin": "请选择管理员",
+    "transferWarning": "原管理员将失去访问权限；正在使用的环境不能转移。",
+    "transferConfirm": "确认转移",
+    "transferSuccess": "已成功转移 {{count}} 个环境。",
+    "errors": {
+      "notLoggedIn": "请先登录公司账号。",
+      "superAdminRequired": "只有超级管理员可以执行此操作。",
+      "requestFailed": "公司账号管理请求失败，请重试。",
+      "invalidResponse": "公司服务器返回了无效数据。",
+      "invalidUsername": "用户名需为3至64位，只能包含字母、数字、点、下划线或短横线。",
+      "passwordTooLong": "密码不能超过256位。",
+      "usernameExists": "该用户名已存在。",
+      "userNotFound": "未找到管理员账号。",
+      "superAdminPasswordResetForbidden": "不能在此重置超级管理员密码。",
+      "invalidBatchTransfer": "请选择1至500个有效环境进行转移。",
+      "activeAdminNotFound": "目标管理员不存在或已停用。",
+      "profilesLocked": "所选环境中有 {{count}} 个正在使用，请关闭后再转移。"
+    }
   }
 }

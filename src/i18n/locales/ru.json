@@ -381,7 +381,12 @@
       "description": "Шифрует данные профиля на диске. Требуется для запуска."
     },
     "downloadingSubtitle": "Загрузка…",
-    "browsersDownloading": "Браузеры ещё загружаются. Создание профилей станет доступно после завершения загрузки."
+    "browsersDownloading": "Браузеры ещё загружаются. Создание профилей станет доступно после завершения загрузки.",
+    "startupUrl": {
+      "label": "Startup page URL",
+      "description": "Open this page automatically when the profile starts.",
+      "placeholder": "https://example.com"
+    }
   },
   "deleteDialog": {
     "title": "Удалить профиль",
@@ -429,6 +434,11 @@
     "noProxies": "Прокси не настроены",
     "noProxiesDescription": "Добавьте прокси для маршрутизации трафика браузера через него.",
     "form": {
+      "quickInput": "Paste proxy details",
+      "quickInputPlaceholder": "IP:port username password",
+      "quickInputHint": "Spaces and tabs are supported. Pasting fills the fields below.",
+      "quickInputInvalid": "Could not recognize the proxy format",
+      "quickInputRecognized": "Proxy details filled automatically",
       "name": "Название",
       "namePlaceholder": "Введите название прокси",
       "type": "Тип",
@@ -633,6 +643,12 @@
       "linkCodeLabel": "Код входа",
       "linkCodePlaceholder": "Вставьте код с сайта",
       "signInTitle": "Войти",
+      "companyLoginInstructions": "Sign in with your company browser account.",
+      "username": "Username",
+      "usernamePlaceholder": "Enter your username",
+      "password": "Password",
+      "passwordPlaceholder": "Enter your password",
+      "companyLogin": "Sign in",
       "verifyAndLogin": "Подтвердить и Войти",
       "loggingIn": "Вход...",
       "connected": "Подключено",
@@ -1167,7 +1183,8 @@
       "security": "Безопасность",
       "delete": "Удалить профиль",
       "activity": "Активность",
-      "launchHook": "Хук запуска"
+      "launchHook": "Хук запуска",
+      "launchSettings": "Launch settings"
     },
     "sectionDesc": {
       "fingerprint": "Настройте, как этот профиль выглядит для скриптов отпечатков.",
@@ -1202,6 +1219,12 @@
       "syncing": "Синхронизация",
       "synced": "Синхронизировано",
       "error": "Ошибка"
+    },
+    "startupUrl": {
+      "label": "Startup page URL",
+      "description": "Open this page automatically when the profile starts.",
+      "placeholder": "https://example.com",
+      "invalidUrlHint": "Enter a complete HTTP or HTTPS URL."
     }
   },
   "extensions": {
@@ -1802,7 +1825,8 @@
     "updateChecksumsUnavailable": "Не удалось проверить обновление {{version}}: файл контрольных сумм не удалось получить. Обновление не было установлено; попытка будет повторена позже.",
     "updateChecksumMismatch": "Загруженный файл обновления {{file}} не прошёл проверку контрольной суммы и был удалён. Попробуйте ещё раз.",
     "nameCannotBeEmpty": "Имя не может быть пустым",
-    "wayfernVersionNotAvailable": "Версия Wayfern {{requested}} недоступна для загрузки. Текущая версия — {{current}}."
+    "wayfernVersionNotAvailable": "Версия Wayfern {{requested}} недоступна для загрузки. Текущая версия — {{current}}.",
+    "invalidStartupUrl": "Enter a valid startup page URL beginning with http:// or https://."
   },
   "rail": {
     "profiles": "Профили",
@@ -2017,6 +2041,56 @@
     "invalidFingerprintDescription": "Конфигурация отпечатка содержит недопустимый JSON. Проверьте расширенные настройки.",
     "saveFailed": "Не удалось сохранить конфигурацию",
     "unknownError": "Произошла неизвестная ошибка"
+  },
+  "companyAdmin": {
+    "title": "Account management",
+    "description": "Create administrators, manage access, and review assigned profiles.",
+    "createAdmin": "New administrator",
+    "username": "Username",
+    "role": "Role",
+    "profileCount": "Profiles",
+    "createdAt": "Created",
+    "roles": {
+      "admin": "Administrator",
+      "superAdmin": "Super administrator"
+    },
+    "createTitle": "Create administrator",
+    "createDescription": "Create a normal administrator account for company profile access.",
+    "password": "New password",
+    "confirmPassword": "Confirm password",
+    "passwordTooShort": "Password must be at least 12 characters.",
+    "passwordMismatch": "The two passwords do not match.",
+    "createSuccess": "Administrator created.",
+    "resetPassword": "Reset password",
+    "resetTitle": "Reset administrator password",
+    "resetDescription": "Set a new password for {{username}}. Their existing sessions will be revoked.",
+    "resetSuccess": "Password reset. Existing sessions have been revoked.",
+    "enableSuccess": "Administrator enabled.",
+    "disableSuccess": "Administrator disabled.",
+    "disabledFilter": "{{username}} (disabled)",
+    "unassigned": "Unassigned",
+    "transferAction": "Transfer to administrator",
+    "transferTitle": "Transfer selected profiles",
+    "transferDescription": "Transfer {{count}} selected profile(s) to one administrator.",
+    "transferTarget": "Target administrator",
+    "selectAdmin": "Select an administrator",
+    "transferWarning": "The previous administrators will lose access. Profiles currently in use cannot be transferred.",
+    "transferConfirm": "Confirm transfer",
+    "transferSuccess": "Transferred {{count}} profile(s).",
+    "errors": {
+      "notLoggedIn": "Sign in to the company account first.",
+      "superAdminRequired": "Only a super administrator can perform this action.",
+      "requestFailed": "The company management request failed. Please try again.",
+      "invalidResponse": "The company server returned an invalid response.",
+      "invalidUsername": "Username must be 3-64 characters and use letters, numbers, dots, underscores, or hyphens.",
+      "passwordTooLong": "Password cannot exceed 256 characters.",
+      "usernameExists": "This username already exists.",
+      "userNotFound": "Administrator account not found.",
+      "superAdminPasswordResetForbidden": "Super administrator passwords cannot be reset here.",
+      "invalidBatchTransfer": "Select between 1 and 500 valid profiles to transfer.",
+      "activeAdminNotFound": "The target administrator does not exist or is disabled.",
+      "profilesLocked": "{{count}} selected profile(s) are currently in use. Close them before transferring."
+    }
   },
   "cookieCopy": {
     "noOtherTargets": "Других выбранных Wayfern профилей нет"

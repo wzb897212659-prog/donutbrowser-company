@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { translateBackendError } from "@/lib/backend-errors";
-import type { StoredProxy } from "@/types";
+import type { ProxyParseResult, StoredProxy } from "@/types";
 import { RippleButton } from "./ui/ripple";
 
 interface ProxyFormData {
@@ -57,10 +57,48 @@ export function ProxyFormDialog({
   const { t } = useTranslation();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState<ProxyFormData>(DEFAULT_FORM);
+  const [quickInput, setQuickInput] = useState("");
 
   const resetForm = useCallback(() => {
     setForm(DEFAULT_FORM);
+    setQuickInput("");
   }, []);
+
+  const applyQuickInput = useCallback(
+    async (raw: string) => {
+      const content = raw.trim();
+      if (!content) return;
+
+      try {
+        const results = await invoke<ProxyParseResult[]>("parse_txt_proxies", {
+          content,
+        });
+        const parsed = results.length === 1 ? results[0] : undefined;
+        if (parsed?.status !== "parsed") {
+          toast.error(t("proxies.form.quickInputInvalid"));
+          return;
+        }
+
+        setForm((previous) => ({
+          ...previous,
+          name: previous.name.trim()
+            ? previous.name
+            : `${parsed.host}:${parsed.port}`,
+          proxy_type: parsed.proxy_type,
+          host: parsed.host,
+          port: parsed.port,
+          username: parsed.username ?? "",
+          password: parsed.password ?? "",
+        }));
+        setQuickInput("");
+        toast.success(t("proxies.form.quickInputRecognized"));
+      } catch (error) {
+        console.error("Failed to parse proxy input:", error);
+        toast.error(t("proxies.form.quickInputInvalid"));
+      }
+    },
+    [t],
+  );
 
   useEffect(() => {
     if (!isOpen) {
@@ -162,6 +200,36 @@ export function ProxyFormDialog({
         </DialogHeader>
 
         <div className="@container grid gap-4 py-4">
+          {!editingProxy && (
+            <div className="grid gap-2 rounded-md border border-border bg-muted/20 p-3">
+              <Label htmlFor="proxy-quick-input">
+                {t("proxies.form.quickInput")}
+              </Label>
+              <Input
+                id="proxy-quick-input"
+                value={quickInput}
+                onChange={(event) => {
+                  setQuickInput(event.target.value);
+                }}
+                onBlur={() => {
+                  void applyQuickInput(quickInput);
+                }}
+                onPaste={(event) => {
+                  const pasted = event.clipboardData.getData("text");
+                  if (!pasted.trim()) return;
+                  event.preventDefault();
+                  void applyQuickInput(pasted);
+                }}
+                placeholder={t("proxies.form.quickInputPlaceholder")}
+                autoComplete="off"
+                disabled={isSubmitting}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t("proxies.form.quickInputHint")}
+              </p>
+            </div>
+          )}
+
           <div className="grid gap-2">
             <Label htmlFor="proxy-name">{t("proxies.form.name")}</Label>
             <Input

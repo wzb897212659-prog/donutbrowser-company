@@ -6,6 +6,7 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 
 use crate::cloud_auth::{CloudAuthManager, CLOUD_API_URL, CLOUD_AUTH};
+use crate::company_auth::{COMPANY_API_URL, COMPANY_AUTH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileLockInfo {
@@ -29,12 +30,15 @@ struct AcquireLockResponse {
   locked_by: Option<String>,
   #[serde(rename = "lockedByEmail")]
   locked_by_email: Option<String>,
+  #[serde(rename = "leaseToken")]
+  lease_token: Option<String>,
 }
 
 pub struct ProfileLockManager {
   locks: RwLock<HashMap<String, ProfileLockInfo>>,
   heartbeat_handle: Mutex<Option<JoinHandle<()>>>,
   connected: Mutex<bool>,
+  lease_tokens: RwLock<HashMap<String, String>>,
 }
 
 lazy_static! {
@@ -45,11 +49,41 @@ lazy_static! {
 pub use PROFILE_LOCK as TEAM_LOCK;
 
 impl ProfileLockManager {
+  async fn auth_context() -> Result<(String, String, String, String), String> {
+    if COMPANY_AUTH.is_logged_in().await {
+      let token = crate::company_auth::CompanyAuthManager::access_token()?
+        .ok_or_else(|| "Not logged in".to_string())?;
+      let state = COMPANY_AUTH
+        .state()
+        .await
+        .ok_or_else(|| "Not logged in".to_string())?;
+      return Ok((
+        token,
+        COMPANY_API_URL.to_string(),
+        state.user.id,
+        state.user.email,
+      ));
+    }
+    let token =
+      CloudAuthManager::load_access_token()?.ok_or_else(|| "Not logged in".to_string())?;
+    let state = CLOUD_AUTH
+      .get_user()
+      .await
+      .ok_or_else(|| "Not logged in".to_string())?;
+    Ok((
+      token,
+      CLOUD_API_URL.to_string(),
+      state.user.id,
+      state.user.email,
+    ))
+  }
+
   fn new() -> Self {
     Self {
       locks: RwLock::new(HashMap::new()),
       heartbeat_handle: Mutex::new(None),
       connected: Mutex::new(false),
+      lease_tokens: RwLock::new(HashMap::new()),
     }
   }
 
@@ -82,6 +116,7 @@ impl ProfileLockManager {
       let mut locks = self.locks.write().await;
       locks.clear();
     }
+    self.lease_tokens.write().await.clear();
 
     {
       let mut c = self.connected.lock().await;
@@ -95,13 +130,14 @@ impl ProfileLockManager {
 
   pub async fn acquire_lock(&self, profile_id: &str) -> Result<(), String> {
     let client = Client::new();
-    let access_token =
-      CloudAuthManager::load_access_token()?.ok_or_else(|| "Not logged in".to_string())?;
+    let (access_token, api_url, user_id, user_email) = Self::auth_context().await?;
 
-    let url = format!("{CLOUD_API_URL}/api/profile-locks/{profile_id}");
+    let url = format!("{api_url}/profile-locks/{profile_id}");
     let response = client
       .post(&url)
       .header("Authorization", format!("Bearer {access_token}"))
+      .header("x-device-id", crate::company_auth::device_id())
+      .json(&serde_json::json!({ "deviceId": crate::company_auth::device_id() }))
       .send()
       .await
       .map_err(|e| format!("Failed to acquire lock: {e}"))?;
@@ -123,21 +159,26 @@ impl ProfileLockManager {
         .unwrap_or_else(|| "another device".to_string());
       return Err(format!("Profile is in use by {email}"));
     }
+    if let Some(lease_token) = result.lease_token {
+      self
+        .lease_tokens
+        .write()
+        .await
+        .insert(profile_id.to_string(), lease_token);
+    }
 
     // Update local cache
-    if let Some(user) = CLOUD_AUTH.get_user().await {
-      let mut locks = self.locks.write().await;
-      locks.insert(
-        profile_id.to_string(),
-        ProfileLockInfo {
-          profile_id: profile_id.to_string(),
-          locked_by: user.user.id.clone(),
-          locked_by_email: user.user.email.clone(),
-          locked_at: chrono::Utc::now().to_rfc3339(),
-          expires_at: None,
-        },
-      );
-    }
+    let mut locks = self.locks.write().await;
+    locks.insert(
+      profile_id.to_string(),
+      ProfileLockInfo {
+        profile_id: profile_id.to_string(),
+        locked_by: user_id,
+        locked_by_email: user_email,
+        locked_at: chrono::Utc::now().to_rfc3339(),
+        expires_at: None,
+      },
+    );
 
     let _ = crate::events::emit(
       "profile-lock-changed",
@@ -149,13 +190,20 @@ impl ProfileLockManager {
 
   pub async fn release_lock(&self, profile_id: &str) -> Result<(), String> {
     let client = Client::new();
-    let access_token =
-      CloudAuthManager::load_access_token()?.ok_or_else(|| "Not logged in".to_string())?;
+    let (access_token, api_url, _, _) = Self::auth_context().await?;
 
-    let url = format!("{CLOUD_API_URL}/api/profile-locks/{profile_id}");
+    let url = format!("{api_url}/profile-locks/{profile_id}");
+    let lease_token = self
+      .lease_tokens
+      .read()
+      .await
+      .get(profile_id)
+      .cloned()
+      .unwrap_or_default();
     let _ = client
       .delete(&url)
       .header("Authorization", format!("Bearer {access_token}"))
+      .header("x-lease-token", lease_token)
       .send()
       .await;
 
@@ -163,6 +211,7 @@ impl ProfileLockManager {
       let mut locks = self.locks.write().await;
       locks.remove(profile_id);
     }
+    self.lease_tokens.write().await.remove(profile_id);
 
     let _ = crate::events::emit(
       "profile-lock-changed",
@@ -185,6 +234,9 @@ impl ProfileLockManager {
   pub async fn is_locked_by_another(&self, profile_id: &str) -> bool {
     let locks = self.locks.read().await;
     if let Some(lock) = locks.get(profile_id) {
+      if let Some(user) = COMPANY_AUTH.state().await {
+        return lock.locked_by != user.user.id;
+      }
       if let Some(user) = CLOUD_AUTH.get_user().await {
         return lock.locked_by != user.user.id;
       }
@@ -192,12 +244,15 @@ impl ProfileLockManager {
     false
   }
 
+  pub async fn has_held_lock(&self, profile_id: &str) -> bool {
+    self.lease_tokens.read().await.contains_key(profile_id)
+  }
+
   async fn fetch_locks(&self) -> Result<(), String> {
     let client = Client::new();
-    let access_token =
-      CloudAuthManager::load_access_token()?.ok_or_else(|| "Not logged in".to_string())?;
+    let (access_token, api_url, _, _) = Self::auth_context().await?;
 
-    let url = format!("{CLOUD_API_URL}/api/profile-locks");
+    let url = format!("{api_url}/profile-locks");
     let response = client
       .get(&url)
       .header("Authorization", format!("Bearer {access_token}"))
@@ -240,7 +295,13 @@ impl ProfileLockManager {
         // Send heartbeat for each held lock
         let held_locks: Vec<String> = {
           let locks = PROFILE_LOCK.locks.read().await;
-          if let Some(user) = CLOUD_AUTH.get_user().await {
+          if let Some(user) = COMPANY_AUTH.state().await {
+            locks
+              .values()
+              .filter(|l| l.locked_by == user.user.id)
+              .map(|l| l.profile_id.clone())
+              .collect()
+          } else if let Some(user) = CLOUD_AUTH.get_user().await {
             locks
               .values()
               .filter(|l| l.locked_by == user.user.id)
@@ -253,11 +314,20 @@ impl ProfileLockManager {
 
         for profile_id in held_locks {
           let client = Client::new();
-          if let Ok(Some(token)) = CloudAuthManager::load_access_token() {
-            let url = format!("{CLOUD_API_URL}/api/profile-locks/{profile_id}/heartbeat");
+          if let Ok((token, api_url, _, _)) = ProfileLockManager::auth_context().await {
+            let url = format!("{api_url}/profile-locks/{profile_id}/heartbeat");
+            let lease_token = PROFILE_LOCK
+              .lease_tokens
+              .read()
+              .await
+              .get(&profile_id)
+              .cloned()
+              .unwrap_or_default();
             let _ = client
               .post(&url)
               .header("Authorization", format!("Bearer {token}"))
+              .header("x-lease-token", &lease_token)
+              .json(&serde_json::json!({ "leaseToken": lease_token }))
               .send()
               .await;
           }
@@ -281,7 +351,7 @@ pub async fn acquire_team_lock_if_needed(
   if !profile.is_sync_enabled() {
     return Ok(());
   }
-  if !CLOUD_AUTH.has_active_paid_subscription().await {
+  if !COMPANY_AUTH.is_logged_in().await && !CLOUD_AUTH.has_active_paid_subscription().await {
     return Ok(());
   }
 
@@ -300,7 +370,23 @@ pub async fn acquire_team_lock_if_needed(
     return Err("Profile is in use on another device".to_string());
   }
 
-  PROFILE_LOCK.acquire_lock(&profile.id.to_string()).await
+  match PROFILE_LOCK.acquire_lock(&profile.id.to_string()).await {
+    Ok(()) => Ok(()),
+    Err(error)
+      if COMPANY_AUTH.is_logged_in().await
+        && COMPANY_AUTH
+          .offline_profile_authorized(&profile.id.to_string())
+          .await
+        && crate::sync::has_verified_company_snapshot(&profile.id.to_string())
+        && error.starts_with("Failed to acquire lock:") =>
+    {
+      log::warn!(
+        "Company control server unavailable; allowing offline profile launch within the 7-day authorization window"
+      );
+      Ok(())
+    }
+    Err(error) => Err(error),
+  }
 }
 
 /// Release profile lock if profile is sync-enabled and user has a paid subscription.
@@ -308,7 +394,7 @@ pub async fn release_team_lock_if_needed(profile: &crate::profile::BrowserProfil
   if !profile.is_sync_enabled() {
     return;
   }
-  if !CLOUD_AUTH.has_active_paid_subscription().await {
+  if !COMPANY_AUTH.is_logged_in().await && !CLOUD_AUTH.has_active_paid_subscription().await {
     return;
   }
 

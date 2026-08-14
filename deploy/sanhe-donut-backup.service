@@ -1,0 +1,9 @@
+[Unit]
+Description=Back up Sanhe Donut control database to COS
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sanhe-donut/deploy/backup-postgres.sh
+User=root
+UMask=0077

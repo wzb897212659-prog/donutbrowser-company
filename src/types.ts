@@ -19,6 +19,7 @@ export interface BrowserProfile {
   proxy_id?: string; // Reference to stored proxy
   vpn_id?: string; // Reference to stored VPN config
   launch_hook?: string;
+  startup_url?: string;
   process_id?: number;
   last_launch?: number;
   release_type: string;
@@ -134,6 +135,27 @@ export interface CloudAuthState {
   logged_in_at: string;
 }
 
+export interface CompanyAdminUser {
+  id: string;
+  username: string;
+  role: "super_admin" | "admin";
+  active: boolean;
+  assignedProfileCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CompanyManagedProfile {
+  id: string;
+  ownerId: string;
+  assignedUserIds: string[];
+}
+
+export interface CompanyAdminOverview {
+  users: CompanyAdminUser[];
+  profiles: CompanyManagedProfile[];
+}
+
 export interface ProfileSyncStatusEvent {
   profile_id: string;
   status: "disabled" | "syncing" | "synced" | "error" | "pending";
@@ -141,6 +163,7 @@ export interface ProfileSyncStatusEvent {
 
 export interface ProxyCheckResult {
   ip: string;
+  province?: string;
   city?: string;
   country?: string;
   country_code?: string;

@@ -1,12 +1,9 @@
 "use client";
 
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { LuExternalLink } from "react-icons/lu";
 import { LoadingButton } from "@/components/loading-button";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -18,8 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCloudAuth } from "@/hooks/use-cloud-auth";
 import { showErrorToast, showSuccessToast } from "@/lib/toast-utils";
-
-const DEVICE_LINK_URL = "https://donutbrowser.com/auth/link";
 
 interface DeviceCodeVerifyDialogProps {
   isOpen: boolean;
@@ -38,37 +33,26 @@ export function DeviceCodeVerifyDialog({
   onClose,
 }: DeviceCodeVerifyDialogProps) {
   const { t } = useTranslation();
-  const { exchangeDeviceCode } = useCloudAuth();
-  const [linkCode, setLinkCode] = useState("");
+  const { loginWithPassword } = useCloudAuth();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
-  const [isOpeningLogin, setIsOpeningLogin] = useState(false);
-
-  const handleOpenLogin = async () => {
-    setIsOpeningLogin(true);
-    try {
-      await openUrl(DEVICE_LINK_URL);
-    } catch (error) {
-      console.error("Failed to open login link:", error);
-      showErrorToast(String(error));
-    } finally {
-      setIsOpeningLogin(false);
-    }
-  };
 
   // Reset the field when the dialog reopens so a stale code from a
   // previous attempt doesn't auto-populate.
   useEffect(() => {
     if (isOpen) {
-      setLinkCode("");
+      setUsername("");
+      setPassword("");
     }
   }, [isOpen]);
 
   const handleVerify = async () => {
-    const trimmed = linkCode.trim();
-    if (!trimmed) return;
+    const trimmed = username.trim();
+    if (!trimmed || !password) return;
     setIsVerifying(true);
     try {
-      await exchangeDeviceCode(trimmed);
+      await loginWithPassword(trimmed, password);
       showSuccessToast(t("sync.cloud.loginSuccess"));
       try {
         await invoke("restart_sync_service");
@@ -77,7 +61,7 @@ export function DeviceCodeVerifyDialog({
       }
       onClose(true);
     } catch (error) {
-      console.error("Device-code exchange failed:", error);
+      console.error("Company login failed:", error);
       showErrorToast(String(error));
     } finally {
       setIsVerifying(false);
@@ -95,49 +79,45 @@ export function DeviceCodeVerifyDialog({
         <DialogHeader>
           <DialogTitle>{t("sync.cloud.signInTitle")}</DialogTitle>
           <DialogDescription>
-            {t("sync.cloud.deviceLinkInstructions")}
+            {t("sync.cloud.companyLoginInstructions")}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void handleOpenLogin()}
-            disabled={isOpeningLogin}
-            className="w-full gap-1.5"
-          >
-            <LuExternalLink className="size-3.5" />
-            {t("sync.cloud.openLogin")}
-          </Button>
           <div className="space-y-2">
-            <Label htmlFor="device-link-code">
-              {t("sync.cloud.linkCodeLabel")}
-            </Label>
+            <Label htmlFor="company-username">{t("sync.cloud.username")}</Label>
             <Input
-              id="device-link-code"
-              placeholder={t("sync.cloud.linkCodePlaceholder")}
-              value={linkCode}
+              id="company-username"
+              placeholder={t("sync.cloud.usernamePlaceholder")}
+              value={username}
               onChange={(e) => {
-                setLinkCode(e.target.value);
+                setUsername(e.target.value);
               }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && linkCode.trim()) {
-                  void handleVerify();
-                }
-              }}
-              autoComplete="off"
+              autoComplete="username"
               spellCheck={false}
               autoFocus
+            />
+            <Label htmlFor="company-password">{t("sync.cloud.password")}</Label>
+            <Input
+              id="company-password"
+              type="password"
+              placeholder={t("sync.cloud.passwordPlaceholder")}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && username.trim() && password)
+                  void handleVerify();
+              }}
+              autoComplete="current-password"
             />
             <LoadingButton
               onClick={() => void handleVerify()}
               isLoading={isVerifying}
-              disabled={!linkCode.trim()}
+              disabled={!username.trim() || !password}
               className="w-full"
             >
               {isVerifying
                 ? t("sync.cloud.loggingIn")
-                : t("sync.cloud.verifyAndLogin")}
+                : t("sync.cloud.companyLogin")}
             </LoadingButton>
           </div>
         </div>

@@ -1,0 +1,18 @@
+{
+  "Rules": [
+    {
+      "ID": "profile-history-30-days",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "company/profiles/" },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 30 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+    },
+    {
+      "ID": "database-backups-30-days",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "database-backups/" },
+      "Expiration": { "Days": 30 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 30 }
+    }
+  ]
+}

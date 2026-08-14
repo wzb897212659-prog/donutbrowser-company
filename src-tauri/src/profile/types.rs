@@ -33,6 +33,8 @@ pub struct BrowserProfile {
   #[serde(default)]
   pub launch_hook: Option<String>,
   #[serde(default)]
+  pub startup_url: Option<String>,
+  #[serde(default)]
   pub process_id: Option<u32>,
   #[serde(default)]
   pub last_launch: Option<u64>,
@@ -78,7 +80,7 @@ pub struct BrowserProfile {
   #[serde(default)]
   pub created_at: Option<u64>,
   /// Unix seconds of the last meaningful metadata edit (name, tags, note,
-  /// proxy/vpn/group/extension assignment, launch hook, bypass rules, dns).
+  /// proxy/vpn/group/extension assignment, launch settings, bypass rules, dns).
   /// Source of truth for metadata sync conflict resolution (last-write-wins);
   /// NOT bumped by browser-file changes, which sync via the file manifest.
   #[serde(default)]

@@ -3,7 +3,9 @@ FROM node:22-alpine AS builder
 WORKDIR /build
 COPY donut-sync/package.json donut-sync/tsconfig.json donut-sync/tsconfig.build.json ./
 COPY donut-sync/src/ src/
-RUN npm install
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+RUN npm config set registry "$NPM_REGISTRY" \
+    && npm install --no-audit --no-fund
 RUN npm run build
 RUN npm prune --omit=dev
 

@@ -1192,6 +1192,10 @@ pub async fn launch_browser_profile_impl(
     profile.id
   );
 
+  // An explicit URL from API/MCP/deep-link callers takes precedence. Normal
+  // UI launches use the profile's persisted startup page.
+  let launch_url = url.or_else(|| profile.startup_url.clone());
+
   if profile.is_cross_os() {
     return Err(format!(
       "Cannot launch profile '{}': this profile was created on {} and cannot be launched on a different operating system",
@@ -1253,14 +1257,14 @@ pub async fn launch_browser_profile_impl(
       .launch_browser_with_debugging(
         app_handle.clone(),
         &profile_for_launch,
-        url,
+        launch_url,
         remote_debugging_port,
         headless,
       )
       .await
   } else {
     browser_runner
-      .launch_or_open_url(app_handle.clone(), &profile_for_launch, url, None)
+      .launch_or_open_url(app_handle.clone(), &profile_for_launch, launch_url, None)
       .await
   };
   let updated_profile = launch_result.map_err(|e| {

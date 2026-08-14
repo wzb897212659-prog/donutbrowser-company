@@ -11,6 +11,7 @@ import {
   LuPlug,
   LuPuzzle,
   LuUser,
+  LuUserCog,
   LuUsers,
 } from "react-icons/lu";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ export type AppPage =
   | "settings"
   | "integrations"
   | "account"
+  | "company-admin"
   | "import"
   | "shortcuts";
 
@@ -236,12 +238,14 @@ function useLogoEasterEgg({
 interface RailNavProps {
   currentPage: AppPage;
   onNavigate: (page: AppPage) => void;
+  isSuperAdmin?: boolean;
 }
 
 interface RailItem {
   page: AppPage;
   Icon: React.ComponentType<{ className?: string }>;
   labelKey: string;
+  superAdminOnly?: boolean;
 }
 
 const TOP_ITEMS: RailItem[] = [
@@ -251,6 +255,12 @@ const TOP_ITEMS: RailItem[] = [
   { page: "groups", Icon: LuUsers, labelKey: "rail.groups" },
   { page: "integrations", Icon: LuPlug, labelKey: "rail.integrations" },
   { page: "account", Icon: LuCloud, labelKey: "rail.account" },
+  {
+    page: "company-admin",
+    Icon: LuUserCog,
+    labelKey: "companyAdmin.title",
+    superAdminOnly: true,
+  },
 ];
 
 interface MoreMenuItem {
@@ -275,7 +285,11 @@ const MORE_ITEMS: MoreMenuItem[] = [
   },
 ];
 
-export function RailNav({ currentPage, onNavigate }: RailNavProps) {
+export function RailNav({
+  currentPage,
+  onNavigate,
+  isSuperAdmin = false,
+}: RailNavProps) {
   const { t } = useTranslation();
   const [moreOpen, setMoreOpen] = useState(false);
   const {
@@ -339,38 +353,40 @@ export function RailNav({ currentPage, onNavigate }: RailNavProps) {
       <div className="my-1 h-px w-5 shrink-0 bg-border" />
 
       <div className="flex min-h-0 w-full scrollbar-none flex-col items-center gap-1 overflow-y-auto [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        {TOP_ITEMS.map(({ page, Icon, labelKey }) => {
-          const active = currentPage === page;
-          return (
-            <Tooltip key={page} delayDuration={300}>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onNavigate(page);
-                  }}
-                  aria-label={t(labelKey)}
-                  aria-current={active ? "page" : undefined}
-                  className={cn(
-                    "relative grid size-7 shrink-0 cursor-pointer place-items-center rounded-md transition-colors duration-100",
-                    active
-                      ? "bg-accent text-foreground"
-                      : "text-muted-foreground hover:bg-accent/50 hover:text-card-foreground",
-                  )}
-                >
-                  {active && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute inset-y-1.5 left-[-7px] w-[2px] rounded-full bg-foreground"
-                    />
-                  )}
-                  <Icon className="size-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">{t(labelKey)}</TooltipContent>
-            </Tooltip>
-          );
-        })}
+        {TOP_ITEMS.filter((item) => !item.superAdminOnly || isSuperAdmin).map(
+          ({ page, Icon, labelKey }) => {
+            const active = currentPage === page;
+            return (
+              <Tooltip key={page} delayDuration={300}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onNavigate(page);
+                    }}
+                    aria-label={t(labelKey)}
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "relative grid size-7 shrink-0 cursor-pointer place-items-center rounded-md transition-colors duration-100",
+                      active
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground hover:bg-accent/50 hover:text-card-foreground",
+                    )}
+                  >
+                    {active && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute inset-y-1.5 left-[-7px] w-[2px] rounded-full bg-foreground"
+                      />
+                    )}
+                    <Icon className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{t(labelKey)}</TooltipContent>
+              </Tooltip>
+            );
+          },
+        )}
       </div>
 
       <div className="flex-1" />

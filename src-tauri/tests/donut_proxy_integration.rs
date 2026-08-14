@@ -49,7 +49,7 @@ async fn start_mock_http_server(response_body: &'static str) -> (u16, tokio::tas
 /// Setup function to ensure donut-proxy binary exists and cleanup stale proxies
 async fn setup_test() -> Result<std::path::PathBuf, Box<dyn std::error::Error + Send + Sync>> {
   let cargo_manifest_dir = std::env::var("CARGO_MANIFEST_DIR")?;
-  let project_root = std::path::PathBuf::from(cargo_manifest_dir)
+  let project_root = std::path::PathBuf::from(&cargo_manifest_dir)
     .parent()
     .unwrap()
     .to_path_buf();
@@ -60,11 +60,17 @@ async fn setup_test() -> Result<std::path::PathBuf, Box<dyn std::error::Error + 
   } else {
     "donut-proxy"
   };
-  let proxy_binary = project_root
-    .join("src-tauri")
-    .join("target")
-    .join("debug")
-    .join(proxy_binary_name);
+  let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+    .map(std::path::PathBuf::from)
+    .map(|path| {
+      if path.is_absolute() {
+        path
+      } else {
+        std::path::PathBuf::from(&cargo_manifest_dir).join(path)
+      }
+    })
+    .unwrap_or_else(|| project_root.join("src-tauri").join("target"));
+  let proxy_binary = target_dir.join("debug").join(proxy_binary_name);
 
   if !proxy_binary.exists() {
     println!("Building donut-proxy binary for integration tests...");

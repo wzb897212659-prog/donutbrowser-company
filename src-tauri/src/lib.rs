@@ -16,6 +16,9 @@ static QUIT_CONFIRMED: AtomicBool = AtomicBool::new(false);
 
 mod api_client;
 mod api_server;
+// The signed Tauri updater is active; legacy platform installers remain here
+// solely for restart support and rollback compatibility.
+#[allow(dead_code)]
 mod app_auto_updater;
 pub mod app_dirs;
 mod auto_updater;
@@ -51,6 +54,7 @@ mod wayfern_terms;
 // mod theme_detector; // removed: theme detection handled in webview via CSS prefers-color-scheme
 pub mod cloud_auth;
 mod commercial_license;
+pub mod company_auth;
 mod cookie_manager;
 pub mod events;
 mod mcp_integrations;
@@ -70,7 +74,8 @@ use profile::manager::{
   check_browser_status, clone_profile, create_browser_profile_new, delete_profile,
   list_browser_profiles, rename_profile, update_profile_dns_blocklist, update_profile_launch_hook,
   update_profile_note, update_profile_proxy, update_profile_proxy_bypass_rules,
-  update_profile_tags, update_profile_vpn, update_profile_window_color, update_wayfern_config,
+  update_profile_startup_url, update_profile_tags, update_profile_vpn, update_profile_window_color,
+  update_wayfern_config,
 };
 
 use profile::password::{
@@ -1018,13 +1023,14 @@ pub async fn check_vpn_validity_core(
 
     match ip_utils::fetch_public_ip(Some(&local_proxy_url)).await {
       Ok(ip) => {
-        let (city, country, country_code) =
+        let (province, city, country, country_code) =
           crate::proxy_manager::ProxyManager::get_ip_geolocation(&ip)
             .await
             .unwrap_or_default();
 
         result = Some(crate::proxy_manager::ProxyCheckResult {
           ip,
+          province,
           city,
           country,
           country_code,
@@ -1050,6 +1056,7 @@ pub async fn check_vpn_validity_core(
 
   let result = result.unwrap_or(crate::proxy_manager::ProxyCheckResult {
     ip: String::new(),
+    province: None,
     city: None,
     country: None,
     country_code: None,
@@ -1196,6 +1203,7 @@ async fn generate_sample_fingerprint(
     proxy_id: None,
     vpn_id: None,
     launch_hook: None,
+    startup_url: None,
     last_launch: None,
     release_type: "stable".to_string(),
     wayfern_config: None,
@@ -1422,6 +1430,7 @@ pub fn run() {
     .plugin(tauri_plugin_deep_link::init())
     .plugin(tauri_plugin_fs::init())
     .plugin(tauri_plugin_opener::init())
+    .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_shell::init())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_macos_permissions::init())
@@ -1570,6 +1579,7 @@ pub fn run() {
 
       // Initialize and start background version updater
       let app_handle = app.handle().clone();
+      let app_handle_updates = app.handle().clone();
       tauri::async_runtime::spawn(async move {
         let version_updater = get_version_updater();
 
@@ -1830,7 +1840,7 @@ pub fn run() {
           // disable_auto_updates setting. Previously it bypassed both, so a
           // portable install would auto-download and run the NSIS installer,
           // clobbering the portable folder instead of updating in place.
-          match app_auto_updater::check_for_app_updates().await {
+          match app_auto_updater::check_for_app_updates(app_handle_updates.clone()).await {
             Ok(Some(update_info)) => {
               log::info!(
                 "App update available: {} -> {}",
@@ -2041,7 +2051,21 @@ pub fn run() {
                       .await;
                   }
 
-                  // Notify sync scheduler of running state changes
+                  // Release the cloud team lock when the browser exits naturally
+                  // (window closed by the user). The explicit kill path in
+                  // browser_runner.rs already releases it, but this branch did
+                  // not — leaking the lock, which the 30s heartbeat then renews
+                  // indefinitely. Release BEFORE waking the queued post-exit
+                  // sync. Otherwise the sync borrows this browser lease and the
+                  // release races its revision commit, leaving manifest N+1
+                  // paired with control revision N.
+                  if !is_running {
+                    crate::team_lock::release_team_lock_if_needed(&profile).await;
+                  }
+
+                  // Notify sync scheduler of running state changes only after
+                  // the browser lease has been released. The sync task then
+                  // acquires and owns a fresh lease for its full upload/commit.
                   if let Some(scheduler) = sync::get_global_scheduler() {
                     if is_running {
                       scheduler.mark_profile_running(&profile_id).await;
@@ -2049,16 +2073,6 @@ pub fn run() {
                       // Sync was queued at launch; mark_profile_stopped triggers it
                       scheduler.mark_profile_stopped(&profile_id).await;
                     }
-                  }
-
-                  // Release the cloud team lock when the browser exits naturally
-                  // (window closed by the user). The explicit kill path in
-                  // browser_runner.rs already releases it, but this branch did
-                  // not — leaking the lock, which the 30s heartbeat then renews
-                  // indefinitely. No-op for non-sync/non-paid
-                  // profiles thanks to the guards inside the helper.
-                  if !is_running {
-                    crate::team_lock::release_team_lock_if_needed(&profile).await;
                   }
 
                   last_running_states.insert(profile_id, is_running);
@@ -2209,6 +2223,11 @@ pub fn run() {
         cloud_auth::CloudAuthManager::start_sync_token_refresh_loop(app_handle_cloud).await;
       });
 
+      let app_handle_company = app.handle().clone();
+      tauri::async_runtime::spawn(async move {
+        company_auth::CompanyAuthManager::start_refresh_loop(app_handle_company).await;
+      });
+
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
@@ -2236,6 +2255,7 @@ pub fn run() {
       update_profile_tags,
       update_profile_note,
       update_profile_launch_hook,
+      update_profile_startup_url,
       update_profile_window_color,
       update_profile_proxy_bypass_rules,
       update_profile_dns_blocklist,
@@ -2365,10 +2385,15 @@ pub fn run() {
       get_vpn_status,
       list_active_vpn_connections,
       // Cloud auth commands
-      cloud_auth::cloud_exchange_device_code,
-      cloud_auth::cloud_get_user,
-      cloud_auth::cloud_refresh_profile,
-      cloud_auth::cloud_logout,
+      company_auth::company_login,
+      company_auth::company_get_user,
+      company_auth::company_logout,
+      company_auth::company_refresh,
+      company_auth::company_get_admin_overview,
+      company_auth::company_create_admin,
+      company_auth::company_set_admin_status,
+      company_auth::company_reset_admin_password,
+      company_auth::company_batch_transfer_profiles,
       cloud_auth::cloud_get_proxy_usage,
       cloud_auth::cloud_get_countries,
       cloud_auth::cloud_get_regions,

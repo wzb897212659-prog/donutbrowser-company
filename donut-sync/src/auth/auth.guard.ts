@@ -8,7 +8,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { Request } from "express";
-import * as jwt from "jsonwebtoken";
+import jwt from "jsonwebtoken";
 import type { UserContext } from "./user-context.interface.js";
 
 /** Constant-time string compare; false on length mismatch (no early return). */
@@ -26,6 +26,8 @@ export class AuthGuard implements CanActivate {
   private jwtPublicKey: string | null = null;
   private readonly backendInternalUrl: string | undefined;
   private readonly backendInternalKey: string | undefined;
+  private readonly jwtIssuer: string | undefined;
+  private readonly jwtAudience: string | undefined;
 
   // Short-lived cache of the per-user team scope so membership revocation takes
   // effect quickly (within TTL) without a backend round-trip on every request.
@@ -47,6 +49,8 @@ export class AuthGuard implements CanActivate {
     this.backendInternalKey = this.configService.get<string>(
       "BACKEND_INTERNAL_KEY",
     );
+    this.jwtIssuer = this.configService.get<string>("SYNC_JWT_ISSUER");
+    this.jwtAudience = this.configService.get<string>("SYNC_JWT_AUDIENCE");
   }
 
   /**
@@ -114,6 +118,8 @@ export class AuthGuard implements CanActivate {
       try {
         const decoded = jwt.verify(token, this.jwtPublicKey, {
           algorithms: ["RS256"],
+          issuer: this.jwtIssuer,
+          audience: this.jwtAudience,
         }) as jwt.JwtPayload;
 
         const sub = typeof decoded.sub === "string" ? decoded.sub : "";
@@ -123,7 +129,7 @@ export class AuthGuard implements CanActivate {
         const ownPrefix = decoded.prefix || `users/${sub}/`;
         if (
           typeof ownPrefix !== "string" ||
-          !/^users\/[^/]+\/$/.test(ownPrefix)
+          (!/^users\/[^/]+\/$/.test(ownPrefix) && ownPrefix !== "company/")
         ) {
           throw new Error(`Invalid prefix claim: ${String(decoded.prefix)}`);
         }
@@ -156,6 +162,8 @@ export class AuthGuard implements CanActivate {
           prefix: effectivePrefix,
           profileLimit: effectiveProfileLimit,
           sub,
+          accessToken: token,
+          companyManaged: effectivePrefix === "company/",
         } satisfies UserContext;
         return true;
       } catch (err) {

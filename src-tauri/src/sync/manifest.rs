@@ -24,6 +24,20 @@ pub const DEFAULT_EXCLUDE_PATTERNS: &[&str] = &[
   "**/Service Worker/CacheStorage/**",
   "**/Service Worker/ScriptCache/**",
   "**/Session Storage/**",
+  "**/History",
+  "**/History-journal",
+  "**/Favicons",
+  "**/Favicons-journal",
+  "**/Login Data",
+  "**/Login Data-journal",
+  "**/Web Data",
+  "**/Web Data-journal",
+  "**/Downloads/**",
+  "**/Extensions/**",
+  "**/Extension State/**",
+  "**/Extension Rules/**",
+  "**/Local Extension Settings/**",
+  "**/Sync Extension Settings/**",
   "**/blob_storage/**",
   "**/Crashpad/**",
   "**/Crash Reports/**",
@@ -69,16 +83,65 @@ pub const DEFAULT_EXCLUDE_PATTERNS: &[&str] = &[
 ];
 
 /// A single file entry in the manifest
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ManifestFileEntry {
   pub path: String,
+  /// Original uncompressed file size.
   pub size: u64,
+  /// Bytes stored before optional end-to-end encryption.
+  #[serde(rename = "storedSize", default)]
+  pub stored_size: u64,
   pub mtime: i64,
+  /// BLAKE3 of the original uncompressed bytes.
   pub hash: String,
+  #[serde(default)]
+  pub encoding: StorageEncoding,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageEncoding {
+  #[default]
+  Identity,
+  Zstd,
+}
+
+pub const COMPRESSION_MIN_BYTES: usize = 16 * 1024;
+pub const ZSTD_LEVEL: i32 = 3;
+
+pub fn encode_file_payload(data: &[u8]) -> SyncResult<(Vec<u8>, StorageEncoding)> {
+  if data.len() <= COMPRESSION_MIN_BYTES {
+    return Ok((data.to_vec(), StorageEncoding::Identity));
+  }
+  let compressed = zstd::stream::encode_all(data, ZSTD_LEVEL)
+    .map_err(|e| SyncError::IoError(format!("Failed to compress sync payload: {e}")))?;
+  if compressed.len() * 10 <= data.len() * 9 {
+    Ok((compressed, StorageEncoding::Zstd))
+  } else {
+    Ok((data.to_vec(), StorageEncoding::Identity))
+  }
+}
+
+pub fn decode_file_payload(data: &[u8], encoding: StorageEncoding) -> SyncResult<Vec<u8>> {
+  match encoding {
+    StorageEncoding::Identity => Ok(data.to_vec()),
+    StorageEncoding::Zstd => zstd::stream::decode_all(data)
+      .map_err(|e| SyncError::InvalidData(format!("Failed to decompress sync payload: {e}"))),
+  }
+}
+
+pub fn verify_original_payload(data: &[u8], expected_hash: &str) -> SyncResult<()> {
+  let actual = blake3::hash(data).to_hex().to_string();
+  if actual != expected_hash {
+    return Err(SyncError::InvalidData(format!(
+      "Downloaded file hash mismatch: expected {expected_hash}, got {actual}"
+    )));
+  }
+  Ok(())
 }
 
 /// The sync manifest for a profile
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SyncManifest {
   pub version: u32,
   #[serde(rename = "profileId")]
@@ -92,19 +155,22 @@ pub struct SyncManifest {
   pub files: Vec<ManifestFileEntry>,
   #[serde(default)]
   pub encrypted: bool,
+  #[serde(default)]
+  pub revision: u64,
 }
 
 impl SyncManifest {
   pub fn new(profile_id: String, exclude_globs: Vec<String>) -> Self {
     let now = Utc::now().to_rfc3339();
     Self {
-      version: 1,
+      version: 2,
       profile_id,
       generated_at: now.clone(),
       updated_at: now,
       exclude_globs,
       files: Vec::new(),
       encrypted: false,
+      revision: 0,
     }
   }
 
@@ -403,11 +469,30 @@ pub fn generate_manifest(
           }
         };
 
+        let (stored_size, encoding) = if size > COMPRESSION_MIN_BYTES as u64 {
+          match fs::read(&path)
+            .and_then(|data| encode_file_payload(&data).map_err(std::io::Error::other))
+          {
+            Ok((payload, encoding)) => (payload.len() as u64, encoding),
+            Err(e) => {
+              log::warn!(
+                "Failed to estimate compressed size for {}: {e}",
+                path.display()
+              );
+              (size, StorageEncoding::Identity)
+            }
+          }
+        } else {
+          (size, StorageEncoding::Identity)
+        };
+
         files.push(ManifestFileEntry {
           path: relative_path,
           size,
+          stored_size,
           mtime,
           hash,
+          encoding,
         });
       }
     }
@@ -538,6 +623,36 @@ pub fn compute_diff(local: &SyncManifest, remote: Option<&SyncManifest>) -> Mani
   diff
 }
 
+/// Compute a one-way reconciliation where the remote manifest is authoritative.
+/// Used after a company revision mismatch so an offline device can never
+/// overwrite a newer cloud revision.
+pub fn compute_remote_preferred_diff(local: &SyncManifest, remote: &SyncManifest) -> ManifestDiff {
+  let mut diff = ManifestDiff::default();
+  let local_files: HashMap<&str, &ManifestFileEntry> = local
+    .files
+    .iter()
+    .map(|file| (file.path.as_str(), file))
+    .collect();
+  let remote_files: HashMap<&str, &ManifestFileEntry> = remote
+    .files
+    .iter()
+    .map(|file| (file.path.as_str(), file))
+    .collect();
+
+  for (path, remote_entry) in &remote_files {
+    match local_files.get(path) {
+      Some(local_entry) if local_entry.hash == remote_entry.hash => {}
+      _ => diff.files_to_download.push((*remote_entry).clone()),
+    }
+  }
+  for path in local_files.keys() {
+    if !remote_files.contains_key(path) {
+      diff.files_to_delete_local.push(path.to_string());
+    }
+  }
+  diff
+}
+
 /// Get the path to the hash cache file for a profile
 pub fn get_cache_path(profile_dir: &Path) -> std::path::PathBuf {
   profile_dir.join(".donut-sync").join("cache.json")
@@ -581,7 +696,7 @@ mod tests {
     let manifest = generate_manifest("test-profile", &profile_dir, &mut cache).unwrap();
 
     assert_eq!(manifest.profile_id, "test-profile");
-    assert_eq!(manifest.version, 1);
+    assert_eq!(manifest.version, 2);
     assert!(manifest.files.is_empty());
   }
 
@@ -690,6 +805,53 @@ mod tests {
   }
 
   #[test]
+  fn test_login_state_policy_excludes_nonessential_profile_data() {
+    let temp_dir = TempDir::new().unwrap();
+    let profile = temp_dir.path().join("profile/Default");
+    fs::create_dir_all(profile.join("Local Storage/leveldb")).unwrap();
+    fs::create_dir_all(profile.join("IndexedDB/site.leveldb")).unwrap();
+    fs::create_dir_all(profile.join("Extensions/abc")).unwrap();
+    fs::write(profile.join("Cookies"), "cookie").unwrap();
+    fs::write(profile.join("History"), "history").unwrap();
+    fs::write(profile.join("Login Data"), "passwords").unwrap();
+    fs::write(profile.join("Web Data"), "forms").unwrap();
+    fs::write(profile.join("Local Storage/leveldb/data"), "local").unwrap();
+    fs::write(profile.join("IndexedDB/site.leveldb/data"), "indexed").unwrap();
+    fs::write(profile.join("Extensions/abc/manifest.json"), "extension").unwrap();
+
+    let mut cache = HashCache::default();
+    let manifest = generate_manifest("test", temp_dir.path(), &mut cache).unwrap();
+    let paths: Vec<&str> = manifest.files.iter().map(|f| f.path.as_str()).collect();
+    assert!(paths.iter().any(|p| p.ends_with("Cookies")));
+    assert!(paths.iter().any(|p| p.contains("Local Storage")));
+    assert!(paths.iter().any(|p| p.contains("IndexedDB")));
+    assert!(!paths.iter().any(|p| p.ends_with("History")));
+    assert!(!paths.iter().any(|p| p.ends_with("Login Data")));
+    assert!(!paths.iter().any(|p| p.ends_with("Web Data")));
+    assert!(!paths.iter().any(|p| p.contains("Extensions/")));
+  }
+
+  #[test]
+  fn test_zstd_round_trip_and_hash_verification() {
+    let original = vec![b'a'; COMPRESSION_MIN_BYTES + 1024];
+    let expected_hash = blake3::hash(&original).to_hex().to_string();
+    let (stored, encoding) = encode_file_payload(&original).unwrap();
+    assert_eq!(encoding, StorageEncoding::Zstd);
+    assert!(stored.len() * 10 <= original.len() * 9);
+    let decoded = decode_file_payload(&stored, encoding).unwrap();
+    verify_original_payload(&decoded, &expected_hash).unwrap();
+    assert_eq!(decoded, original);
+  }
+
+  #[test]
+  fn test_small_or_incompressible_payload_stays_identity() {
+    let small = vec![1u8; COMPRESSION_MIN_BYTES];
+    let (stored, encoding) = encode_file_payload(&small).unwrap();
+    assert_eq!(encoding, StorageEncoding::Identity);
+    assert_eq!(stored, small);
+  }
+
+  #[test]
   fn test_compute_diff_upload_all_when_no_remote() {
     let local = SyncManifest {
       version: 1,
@@ -703,15 +865,18 @@ mod tests {
           size: 10,
           mtime: 1000,
           hash: "abc".to_string(),
+          ..Default::default()
         },
         ManifestFileEntry {
           path: "file2.txt".to_string(),
           size: 20,
           mtime: 2000,
           hash: "def".to_string(),
+          ..Default::default()
         },
       ],
       encrypted: false,
+      ..Default::default()
     };
 
     let diff = compute_diff(&local, None);
@@ -720,6 +885,33 @@ mod tests {
     assert!(diff.files_to_download.is_empty());
     assert!(diff.files_to_delete_local.is_empty());
     assert!(diff.files_to_delete_remote.is_empty());
+  }
+
+  #[test]
+  fn test_remote_preferred_diff_never_uploads() {
+    let mut local = SyncManifest::new("test".to_string(), vec![]);
+    local.files.push(ManifestFileEntry {
+      path: "Cookies".to_string(),
+      hash: "local".to_string(),
+      ..Default::default()
+    });
+    local.files.push(ManifestFileEntry {
+      path: "local-only".to_string(),
+      hash: "local".to_string(),
+      ..Default::default()
+    });
+    let mut remote = SyncManifest::new("test".to_string(), vec![]);
+    remote.files.push(ManifestFileEntry {
+      path: "Cookies".to_string(),
+      hash: "remote".to_string(),
+      ..Default::default()
+    });
+
+    let diff = compute_remote_preferred_diff(&local, &remote);
+    assert!(diff.files_to_upload.is_empty());
+    assert!(diff.files_to_delete_remote.is_empty());
+    assert_eq!(diff.files_to_download.len(), 1);
+    assert_eq!(diff.files_to_delete_local, vec!["local-only"]);
   }
 
   #[test]
@@ -739,21 +931,25 @@ mod tests {
           size: 10,
           mtime: 1000,
           hash: "same".to_string(),
+          ..Default::default()
         },
         ManifestFileEntry {
           path: "changed.txt".to_string(),
           size: 10,
           mtime: 2000,
           hash: "new_hash".to_string(),
+          ..Default::default()
         },
         ManifestFileEntry {
           path: "new_file.txt".to_string(),
           size: 5,
           mtime: 3000,
           hash: "new".to_string(),
+          ..Default::default()
         },
       ],
       encrypted: false,
+      ..Default::default()
     };
 
     let remote = SyncManifest {
@@ -768,21 +964,25 @@ mod tests {
           size: 10,
           mtime: 1000,
           hash: "same".to_string(),
+          ..Default::default()
         },
         ManifestFileEntry {
           path: "changed.txt".to_string(),
           size: 10,
           mtime: 1000,
           hash: "old_hash".to_string(),
+          ..Default::default()
         },
         ManifestFileEntry {
           path: "deleted.txt".to_string(),
           size: 8,
           mtime: 500,
           hash: "gone".to_string(),
+          ..Default::default()
         },
       ],
       encrypted: false,
+      ..Default::default()
     };
 
     let diff = compute_diff(&local, Some(&remote));
@@ -832,6 +1032,7 @@ mod tests {
       exclude_globs: vec![],
       files: vec![],
       encrypted: false,
+      ..Default::default()
     };
 
     let remote = SyncManifest {
@@ -846,15 +1047,18 @@ mod tests {
           size: 100,
           mtime: 1000,
           hash: "abc".to_string(),
+          ..Default::default()
         },
         ManifestFileEntry {
           path: "Local State".to_string(),
           size: 200,
           mtime: 1000,
           hash: "def".to_string(),
+          ..Default::default()
         },
       ],
       encrypted: false,
+      ..Default::default()
     };
 
     let diff = compute_diff(&local, Some(&remote));

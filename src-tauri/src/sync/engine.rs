@@ -1,6 +1,9 @@
 use super::client::SyncClient;
 use super::encryption;
-use super::manifest::{compute_diff, generate_manifest, get_cache_path, HashCache, SyncManifest};
+use super::manifest::{
+  compute_diff, compute_remote_preferred_diff, decode_file_payload, encode_file_payload,
+  generate_manifest, get_cache_path, verify_original_payload, HashCache, SyncManifest,
+};
 use super::types::*;
 use crate::events;
 use crate::profile::types::{BrowserProfile, SyncMode};
@@ -13,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Instant;
-use tokio::sync::{Mutex as TokioMutex, Semaphore};
+use tokio::sync::{Mutex as TokioMutex, OwnedMutexGuard, Semaphore};
 
 /// S3 object-metadata key (stored as `x-amz-meta-updated-at`) holding an
 /// entity's user-edit timestamp in unix seconds. Used to resolve sync conflicts
@@ -22,6 +25,8 @@ const UPDATED_AT_META_KEY: &str = "updated-at";
 
 lazy_static::lazy_static! {
   static ref SYNC_CANCEL_FLAGS: StdMutex<HashMap<String, Arc<AtomicBool>>> =
+    StdMutex::new(HashMap::new());
+  static ref COMPANY_PROFILE_SYNC_LOCKS: StdMutex<HashMap<String, Arc<TokioMutex<()>>>> =
     StdMutex::new(HashMap::new());
 }
 
@@ -50,6 +55,193 @@ impl Drop for SyncCancelGuard {
   fn drop(&mut self) {
     clear_sync_cancel(&self.0);
   }
+}
+
+struct CompanySyncLeaseGuard {
+  profile_id: Option<String>,
+  local_guard: Option<OwnedMutexGuard<()>>,
+}
+
+impl Drop for CompanySyncLeaseGuard {
+  fn drop(&mut self) {
+    if let Some(profile_id) = self.profile_id.take() {
+      // Keep the per-profile local mutex until the remote release request has
+      // completed. Without this, a second sync task can race the asynchronous
+      // release and receive PROFILE_LOCKED from its own device.
+      let local_guard = self.local_guard.take();
+      tauri::async_runtime::spawn(async move {
+        if let Err(error) = crate::team_lock::PROFILE_LOCK
+          .release_lock(&profile_id)
+          .await
+        {
+          log::warn!("Failed to release company sync lease for {profile_id}: {error}");
+        }
+        drop(local_guard);
+      });
+    }
+  }
+}
+
+async fn acquire_company_sync_lease(
+  client: &SyncClient,
+  profile_id: &str,
+) -> SyncResult<CompanySyncLeaseGuard> {
+  if !client.is_company_sync() {
+    return Ok(CompanySyncLeaseGuard {
+      profile_id: None,
+      local_guard: None,
+    });
+  }
+  let profile_mutex = {
+    let mut locks = COMPANY_PROFILE_SYNC_LOCKS.lock().unwrap();
+    locks
+      .entry(profile_id.to_string())
+      .or_insert_with(|| Arc::new(TokioMutex::new(())))
+      .clone()
+  };
+  let local_guard = profile_mutex.lock_owned().await;
+  if !crate::team_lock::PROFILE_LOCK.is_connected().await {
+    crate::team_lock::PROFILE_LOCK.connect().await;
+  }
+  if crate::team_lock::PROFILE_LOCK
+    .has_held_lock(profile_id)
+    .await
+  {
+    // The existing lease belongs to a running browser launch, not this sync
+    // operation. Borrow it for authorization, but never release it from the
+    // sync guard: the browser lifecycle remains its sole owner.
+    return Ok(CompanySyncLeaseGuard {
+      profile_id: None,
+      local_guard: Some(local_guard),
+    });
+  }
+  crate::team_lock::PROFILE_LOCK
+    .acquire_lock(profile_id)
+    .await
+    .map_err(SyncError::ConflictError)?;
+  Ok(CompanySyncLeaseGuard {
+    profile_id: Some(profile_id.to_string()),
+    local_guard: Some(local_guard),
+  })
+}
+
+fn company_revision_path(profile_dir: &Path) -> PathBuf {
+  profile_dir.join(".donut-sync").join("company-revision")
+}
+
+fn load_company_revision(profile_dir: &Path) -> Option<u64> {
+  fs::read_to_string(company_revision_path(profile_dir))
+    .ok()
+    .and_then(|value| value.trim().parse().ok())
+}
+
+fn save_company_revision(profile_dir: &Path, revision: u64) -> SyncResult<()> {
+  let path = company_revision_path(profile_dir);
+  if let Some(parent) = path.parent() {
+    fs::create_dir_all(parent)
+      .map_err(|e| SyncError::IoError(format!("Failed to create revision directory: {e}")))?;
+  }
+  fs::write(&path, revision.to_string())
+    .map_err(|e| SyncError::IoError(format!("Failed to save company revision: {e}")))
+}
+
+fn verified_manifest_path(profile_dir: &Path) -> PathBuf {
+  profile_dir
+    .join(".donut-sync")
+    .join("verified-manifest.json")
+}
+
+fn save_verified_manifest(profile_dir: &Path, manifest: &SyncManifest) -> SyncResult<()> {
+  let path = verified_manifest_path(profile_dir);
+  if let Some(parent) = path.parent() {
+    fs::create_dir_all(parent).map_err(|e| {
+      SyncError::IoError(format!("Failed to create verified manifest directory: {e}"))
+    })?;
+  }
+  fs::write(
+    &path,
+    serde_json::to_vec_pretty(manifest)
+      .map_err(|e| SyncError::SerializationError(e.to_string()))?,
+  )
+  .map_err(|e| SyncError::IoError(format!("Failed to save verified manifest: {e}")))
+}
+
+pub fn has_verified_company_snapshot(profile_id: &str) -> bool {
+  let profile_dir = ProfileManager::instance()
+    .get_profiles_dir()
+    .join(profile_id);
+  company_revision_path(&profile_dir).is_file() && verified_manifest_path(&profile_dir).is_file()
+}
+
+fn cleanup_conflict_backups(profile_dir: &Path) {
+  let root = profile_dir.join(".donut-sync").join("conflicts");
+  let Ok(entries) = fs::read_dir(&root) else {
+    return;
+  };
+  let max_age = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+  for entry in entries.flatten() {
+    let expired = entry
+      .metadata()
+      .and_then(|metadata| metadata.modified())
+      .and_then(|modified| modified.elapsed().map_err(std::io::Error::other))
+      .map(|age| age > max_age)
+      .unwrap_or(false);
+    if expired {
+      let _ = fs::remove_dir_all(entry.path());
+    }
+  }
+}
+
+fn save_conflict_backup(
+  profile_dir: &Path,
+  manifest: &SyncManifest,
+  base_revision: Option<u64>,
+  cloud_revision: u64,
+) -> SyncResult<PathBuf> {
+  cleanup_conflict_backups(profile_dir);
+  let backup_dir = profile_dir
+    .join(".donut-sync")
+    .join("conflicts")
+    .join(format!(
+      "{}-base-{}-cloud-{}",
+      Utc::now().timestamp(),
+      base_revision
+        .map(|revision| revision.to_string())
+        .unwrap_or_else(|| "unknown".to_string()),
+      cloud_revision
+    ));
+  for entry in &manifest.files {
+    if !is_safe_manifest_path(&entry.path) {
+      continue;
+    }
+    let source = profile_dir.join(&entry.path);
+    if !source.is_file() {
+      continue;
+    }
+    let destination = backup_dir.join(&entry.path);
+    if let Some(parent) = destination.parent() {
+      fs::create_dir_all(parent).map_err(|e| {
+        SyncError::IoError(format!("Failed to create conflict backup directory: {e}"))
+      })?;
+    }
+    fs::copy(&source, &destination).map_err(|e| {
+      SyncError::IoError(format!(
+        "Failed to back up conflicting file {}: {e}",
+        entry.path
+      ))
+    })?;
+  }
+  fs::write(
+    backup_dir.join("conflict.json"),
+    serde_json::to_vec_pretty(&serde_json::json!({
+      "createdAt": Utc::now().to_rfc3339(),
+      "baseRevision": base_revision,
+      "cloudRevision": cloud_revision,
+    }))
+    .map_err(|e| SyncError::SerializationError(e.to_string()))?,
+  )
+  .map_err(|e| SyncError::IoError(format!("Failed to write conflict metadata: {e}")))?;
+  Ok(backup_dir)
 }
 
 #[tauri::command]
@@ -107,6 +299,28 @@ fn is_safe_manifest_path(path: &str) -> bool {
   }
   p.components()
     .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+}
+
+fn merge_synced_profile_metadata(
+  local: &BrowserProfile,
+  remote: BrowserProfile,
+  synced_at: u64,
+) -> BrowserProfile {
+  let mut updated = local.clone();
+  updated.name = remote.name;
+  updated.tags = remote.tags;
+  updated.note = remote.note;
+  updated.proxy_id = remote.proxy_id;
+  updated.vpn_id = remote.vpn_id;
+  updated.group_id = remote.group_id;
+  updated.extension_group_id = remote.extension_group_id;
+  updated.window_color = remote.window_color;
+  updated.launch_hook = remote.launch_hook;
+  updated.startup_url = remote.startup_url;
+  updated.dns_blocklist = remote.dns_blocklist;
+  updated.proxy_bypass_rules = remote.proxy_bypass_rules;
+  updated.last_sync = Some(synced_at);
+  updated
 }
 
 /// Checkpoint all SQLite WAL files in a profile directory.
@@ -348,6 +562,17 @@ impl SyncEngine {
       return Ok(Self::new(url, token));
     }
 
+    if crate::company_auth::COMPANY_AUTH.is_logged_in().await {
+      let token = crate::company_auth::COMPANY_AUTH
+        .get_or_refresh_access_token(app_handle)
+        .await
+        .map_err(|e| format!("Failed to get company sync token: {e}"))?;
+      return Ok(Self::new(
+        crate::company_auth::COMPANY_SYNC_URL.to_string(),
+        token,
+      ));
+    }
+
     // Fall back to self-hosted settings
     let manager = SettingsManager::instance();
     let settings = manager
@@ -518,8 +743,19 @@ impl SyncEngine {
     let cancel_flag = register_sync_cancel(&profile_id);
     let _cancel_guard = SyncCancelGuard(profile_id.clone());
 
+    // Company sync uses the same exclusive lease as profile launch. This makes
+    // the revision compare-and-set meaningful and prevents a second device
+    // from opening the profile while its object set is being replaced.
+    let _company_sync_lease = acquire_company_sync_lease(&self.client, &profile_id).await?;
+
     // Determine team key prefix for team profiles
     let key_prefix = Self::get_team_key_prefix(profile).await;
+
+    self
+      .client
+      .register_company_profile(&profile_id, &profile.name, &profile.version)
+      .await?;
+    let company_cloud_revision = self.client.prepare_company_sync(&profile_id).await?;
 
     log::info!(
       "Starting delta sync for profile: {} ({}){}",
@@ -587,11 +823,82 @@ impl SyncEngine {
       .download_manifest(&remote_manifest_key, encryption_key.as_ref())
       .await?;
 
+    if company_cloud_revision.is_some()
+      && remote_manifest
+        .as_ref()
+        .is_some_and(|manifest| manifest.version != 2)
+    {
+      return Err(SyncError::InvalidData(
+        "Company sync protocol requires manifest v2".to_string(),
+      ));
+    }
+    if let (Some(cloud_revision), Some(manifest)) =
+      (company_cloud_revision, remote_manifest.as_ref())
+    {
+      if manifest.revision != cloud_revision {
+        return Err(SyncError::InvalidData(format!(
+          "Cloud snapshot is not committed: control revision {cloud_revision}, manifest revision {}",
+          manifest.revision
+        )));
+      }
+    }
+
+    let local_company_revision = load_company_revision(&profile_dir);
+    let remote_authoritative = match (company_cloud_revision, remote_manifest.as_ref()) {
+      (Some(cloud_revision), Some(_)) => local_company_revision != Some(cloud_revision),
+      (Some(cloud_revision), None) if cloud_revision > 0 => {
+        return Err(SyncError::InvalidData(format!(
+          "Cloud revision {cloud_revision} has no committed manifest"
+        )));
+      }
+      _ => false,
+    };
+
+    if remote_authoritative && !local_manifest.files.is_empty() {
+      let cloud_revision = company_cloud_revision.unwrap_or_default();
+      let backup = save_conflict_backup(
+        &profile_dir,
+        &local_manifest,
+        local_company_revision,
+        cloud_revision,
+      )?;
+      log::warn!(
+        "Company profile {} revision changed from {:?} to {}; local state backed up to {}",
+        profile_id,
+        local_company_revision,
+        cloud_revision,
+        backup.display()
+      );
+    }
+
     // Compute diff
-    let diff = compute_diff(&local_manifest, remote_manifest.as_ref());
+    let diff = if remote_authoritative {
+      compute_remote_preferred_diff(
+        &local_manifest,
+        remote_manifest
+          .as_ref()
+          .expect("remote manifest checked above"),
+      )
+    } else {
+      compute_diff(&local_manifest, remote_manifest.as_ref())
+    };
 
     if diff.is_empty() {
+      if let Some(revision) = company_cloud_revision {
+        save_company_revision(&profile_dir, revision)?;
+        save_verified_manifest(
+          &profile_dir,
+          remote_manifest.as_ref().unwrap_or(&local_manifest),
+        )?;
+      }
       log::info!("Profile {} is already in sync", profile_id);
+      // Browser files being unchanged does not imply that profile metadata and
+      // its proxy object are already present locally. This is especially common
+      // after a previous startup recovered the profile while authentication was
+      // unavailable. Always reconcile auxiliary data before returning.
+      self
+        .reconcile_profile_metadata_and_entities(app_handle, profile, &key_prefix)
+        .await?;
       let _ = events::emit(
         "profile-sync-status",
         serde_json::json!({
@@ -697,87 +1004,73 @@ impl SyncEngine {
       log::debug!("Deleted remote file: {}", path);
     }
 
-    // Upload metadata.json (sanitized profile)
-    self
-      .upload_profile_metadata(&profile_id, profile, &key_prefix)
-      .await?;
-
-    // If this sync changed the local profile directory (downloaded files and/or
-    // deleted local files), the manifest generated at the START of the sync is
-    // now stale. Uploading it would advertise wrong hashes/mtimes for the files
-    // we just pulled, so the peer keeps computing a non-empty diff and the two
-    // devices ping-pong re-uploads forever. Regenerate from the
-    // actual on-disk files before uploading. When only uploads happened, the
-    // on-disk state is unchanged and the original manifest is still accurate.
-    let local_changed =
-      !diff.files_to_download.is_empty() || !diff.files_to_delete_local.is_empty();
-    let final_manifest = if local_changed {
-      let mut new_cache = HashCache::load(&cache_path);
-      let mut regenerated = generate_manifest(&profile_id, &profile_dir, &mut new_cache)?;
-      new_cache.save(&cache_path)?;
-      regenerated.encrypted = encryption_key.is_some();
-      regenerated
+    if remote_authoritative {
+      // A revision mismatch means another device committed after this device's
+      // base. The cloud snapshot is authoritative; never re-upload the local
+      // metadata or manifest as part of this reconciliation.
+      if let Some(revision) = company_cloud_revision {
+        save_company_revision(&profile_dir, revision)?;
+        save_verified_manifest(
+          &profile_dir,
+          remote_manifest
+            .as_ref()
+            .expect("remote manifest checked above"),
+        )?;
+      }
     } else {
-      let mut m = local_manifest;
-      m.encrypted = encryption_key.is_some();
-      m
-    };
+      // Upload metadata.json (sanitized profile)
+      self
+        .upload_profile_metadata(&profile_id, profile, &key_prefix)
+        .await?;
 
-    // Upload manifest.json last for atomicity
-    self
-      .upload_manifest(
-        &profile_id,
-        &final_manifest,
-        encryption_key.as_ref(),
-        &key_prefix,
-      )
-      .await?;
+      // If this sync changed the local profile directory (downloaded files and/or
+      // deleted local files), regenerate the manifest from the final on-disk state.
+      let local_changed =
+        !diff.files_to_download.is_empty() || !diff.files_to_delete_local.is_empty();
+      let mut final_manifest = if local_changed {
+        let mut new_cache = HashCache::load(&cache_path);
+        let mut regenerated = generate_manifest(&profile_id, &profile_dir, &mut new_cache)?;
+        new_cache.save(&cache_path)?;
+        regenerated.encrypted = encryption_key.is_some();
+        regenerated
+      } else {
+        let mut manifest = local_manifest;
+        manifest.encrypted = encryption_key.is_some();
+        manifest
+      };
+      if let Some(revision) = company_cloud_revision {
+        final_manifest.revision = revision + 1;
+      }
+
+      // Upload manifest.json last for object-set atomicity. The exclusive lease
+      // remains held until the revision compare-and-set succeeds.
+      self
+        .upload_manifest(
+          &profile_id,
+          &final_manifest,
+          encryption_key.as_ref(),
+          &key_prefix,
+        )
+        .await?;
+      if let Some(base_revision) = company_cloud_revision {
+        let committed = self
+          .client
+          .commit_company_revision(&profile_id, base_revision)
+          .await?
+          .ok_or_else(|| {
+            SyncError::InvalidData("Company revision commit returned no revision".to_string())
+          })?;
+        save_company_revision(&profile_dir, committed)?;
+        save_verified_manifest(&profile_dir, &final_manifest)?;
+      }
+    }
 
     // Sync completed successfully — clean up resume state
     SyncResumeState::delete(&profile_dir);
 
-    // Sync associated proxy, group, and VPN
-    if let Some(proxy_id) = &profile.proxy_id {
-      let _ = self.sync_proxy(proxy_id, Some(app_handle)).await;
-    }
-    if let Some(group_id) = &profile.group_id {
-      let _ = self.sync_group(group_id, Some(app_handle)).await;
-    }
-    if let Some(vpn_id) = &profile.vpn_id {
-      let _ = self.sync_vpn(vpn_id, Some(app_handle)).await;
-    }
-
-    // Download remote metadata and merge changes (name, tags, notes, etc.)
-    let remote_metadata_key = format!("{}profiles/{}/metadata.json", key_prefix, profile_id);
-    if let Ok(remote_meta) = self.download_profile_metadata(&remote_metadata_key).await {
-      let mut updated_profile = profile.clone();
-      // Merge fields that can be changed on other devices
-      updated_profile.name = remote_meta.name;
-      updated_profile.tags = remote_meta.tags;
-      updated_profile.note = remote_meta.note;
-      updated_profile.proxy_id = remote_meta.proxy_id;
-      updated_profile.vpn_id = remote_meta.vpn_id;
-      updated_profile.group_id = remote_meta.group_id;
-      updated_profile.extension_group_id = remote_meta.extension_group_id;
-      updated_profile.window_color = remote_meta.window_color;
-      updated_profile.last_sync = Some(
-        std::time::SystemTime::now()
-          .duration_since(std::time::UNIX_EPOCH)
-          .unwrap()
-          .as_secs(),
-      );
-      let _ = profile_manager.save_profile(&updated_profile);
-    } else {
-      // Fallback: just update last_sync
-      let mut updated_profile = profile.clone();
-      updated_profile.last_sync = Some(
-        std::time::SystemTime::now()
-          .duration_since(std::time::UNIX_EPOCH)
-          .unwrap()
-          .as_secs(),
-      );
-      let _ = profile_manager.save_profile(&updated_profile);
-    }
+    self
+      .reconcile_profile_metadata_and_entities(app_handle, profile, &key_prefix)
+      .await?;
     let _ = events::emit("profiles-changed", ());
 
     let _ = events::emit(
@@ -879,6 +1172,55 @@ impl SyncEngine {
       .map_err(|e| SyncError::SerializationError(format!("Failed to parse metadata: {e}")))?;
 
     Ok(profile)
+  }
+
+  async fn reconcile_profile_metadata_and_entities(
+    &self,
+    app_handle: &tauri::AppHandle,
+    profile: &BrowserProfile,
+    key_prefix: &str,
+  ) -> SyncResult<()> {
+    let profile_id = profile.id.to_string();
+    let remote_key = format!("{}profiles/{}/metadata.json", key_prefix, profile_id);
+    let synced_at = std::time::SystemTime::now()
+      .duration_since(std::time::UNIX_EPOCH)
+      .unwrap_or_default()
+      .as_secs();
+    let effective = match self.download_profile_metadata(&remote_key).await {
+      Ok(remote) => merge_synced_profile_metadata(profile, remote, synced_at),
+      Err(error) => {
+        log::warn!(
+          "Failed to refresh profile {} metadata before auxiliary sync: {}",
+          profile_id,
+          error
+        );
+        let mut fallback = profile.clone();
+        fallback.last_sync = Some(synced_at);
+        fallback
+      }
+    };
+    ProfileManager::instance()
+      .save_profile(&effective)
+      .map_err(|error| SyncError::IoError(format!("Failed to save profile metadata: {error}")))?;
+
+    if let Some(proxy_id) = &effective.proxy_id {
+      if self.client.is_company_sync() {
+        self
+          .sync_profile_proxy(&profile_id, proxy_id, Some(app_handle))
+          .await?;
+      } else {
+        self.sync_proxy(proxy_id, Some(app_handle)).await?;
+      }
+    }
+    if !self.client.is_company_sync() {
+      if let Some(group_id) = &effective.group_id {
+        self.sync_group(group_id, Some(app_handle)).await?;
+      }
+      if let Some(vpn_id) = &effective.vpn_id {
+        self.sync_vpn(vpn_id, Some(app_handle)).await?;
+      }
+    }
+    Ok(())
   }
 
   /// Sync only metadata for cross-OS profiles (tags, notes, proxies, groups).
@@ -1109,6 +1451,7 @@ impl SyncEngine {
       let file_path = profile_dir.join(&file.path);
       let relative_path = file.path.clone();
       let file_size = file.size;
+      let expected_encoding = file.encoding;
       let remote_key = format!(
         "{}profiles/{}/files/{}",
         key_prefix, profile_id_owned, file.path
@@ -1160,8 +1503,25 @@ impl SyncEngine {
           }
         };
 
+        let (encoded_data, actual_encoding) = match encode_file_payload(&data) {
+          Ok(value) => value,
+          Err(e) => {
+            let msg = format!("Failed to encode {}: {}", file_path.display(), e);
+            tracker.record_failure();
+            return Err((relative_path, msg, critical));
+          }
+        };
+        if actual_encoding != expected_encoding {
+          let msg = format!(
+            "Sync payload encoding changed while reading {}",
+            file_path.display()
+          );
+          tracker.record_failure();
+          return Err((relative_path, msg, critical));
+        }
+
         let upload_data = if let Some(ref key) = enc_key {
-          match encryption::encrypt_bytes(key, &data) {
+          match encryption::encrypt_bytes(key, &encoded_data) {
             Ok(encrypted) => encrypted,
             Err(e) => {
               let msg = format!("Failed to encrypt {}: {}", file_path.display(), e);
@@ -1171,7 +1531,7 @@ impl SyncEngine {
             }
           }
         } else {
-          data
+          encoded_data
         };
 
         // Retry loop for network uploads
@@ -1395,6 +1755,8 @@ impl SyncEngine {
       let file_path = profile_dir.join(&file.path);
       let relative_path = file.path.clone();
       let file_size = file.size;
+      let file_encoding = file.encoding;
+      let expected_hash = file.hash.clone();
       let remote_key = format!(
         "{}profiles/{}/files/{}",
         key_prefix, profile_id_owned, file.path
@@ -1436,7 +1798,7 @@ impl SyncEngine {
           }
           match client.download_bytes(&url).await {
             Ok(data) => {
-              let write_data = if let Some(ref key) = enc_key {
+              let encoded_data = if let Some(ref key) = enc_key {
                 match encryption::decrypt_bytes(key, &data) {
                   Ok(decrypted) => decrypted,
                   Err(e) => {
@@ -1449,6 +1811,20 @@ impl SyncEngine {
               } else {
                 data
               };
+
+              let write_data = match decode_file_payload(&encoded_data, file_encoding) {
+                Ok(decoded) => decoded,
+                Err(e) => {
+                  let msg = format!("Failed to decode {}: {}", relative_path, e);
+                  tracker.record_failure();
+                  return Err((relative_path, msg, critical));
+                }
+              };
+              if let Err(e) = verify_original_payload(&write_data, &expected_hash) {
+                let msg = format!("Integrity check failed for {}: {}", relative_path, e);
+                tracker.record_failure();
+                return Err((relative_path, msg, critical));
+              }
 
               if let Some(parent) = file_path.parent() {
                 let _ = fs::create_dir_all(parent);
@@ -1546,32 +1922,66 @@ impl SyncEngine {
     proxy_id: &str,
     app_handle: Option<&tauri::AppHandle>,
   ) -> SyncResult<()> {
+    if self.client.is_company_sync() {
+      // A standalone proxy key has no profile ACL. Company proxies are synced
+      // only through sync_profile_proxy below.
+      return Ok(());
+    }
+    self
+      .sync_proxy_at_key(proxy_id, &format!("proxies/{}.json", proxy_id), app_handle)
+      .await
+  }
+
+  async fn sync_profile_proxy(
+    &self,
+    profile_id: &str,
+    proxy_id: &str,
+    app_handle: Option<&tauri::AppHandle>,
+  ) -> SyncResult<()> {
+    self
+      .sync_proxy_at_key(
+        proxy_id,
+        &format!("profiles/{profile_id}/proxy.json"),
+        app_handle,
+      )
+      .await
+  }
+
+  async fn sync_proxy_at_key(
+    &self,
+    proxy_id: &str,
+    remote_key: &str,
+    app_handle: Option<&tauri::AppHandle>,
+  ) -> SyncResult<()> {
     let proxy_manager = &crate::proxy_manager::PROXY_MANAGER;
     let proxies = proxy_manager.get_stored_proxies();
     let local_proxy = proxies.iter().find(|p| p.id == proxy_id).cloned();
 
-    let remote_key = format!("proxies/{}.json", proxy_id);
-    let stat = self.client.stat(&remote_key).await?;
+    let stat = self.client.stat(remote_key).await?;
 
     match (local_proxy, stat.exists) {
       (Some(proxy), true) => {
         // Both exist - resolve by user-edit timestamp (last-write-wins).
         let local_updated = proxy.updated_at.unwrap_or(0);
-        let remote_updated = self.remote_updated_at(&stat, &remote_key).await;
+        let remote_updated = self.remote_updated_at(&stat, remote_key).await;
 
         if remote_updated > local_updated {
-          self.download_proxy(proxy_id, app_handle).await?;
+          self
+            .download_proxy(proxy_id, remote_key, app_handle)
+            .await?;
         } else if local_updated > remote_updated {
-          self.upload_proxy(&proxy).await?;
+          self.upload_proxy(&proxy, remote_key).await?;
         }
       }
       (Some(proxy), false) => {
         // Only local exists - upload
-        self.upload_proxy(&proxy).await?;
+        self.upload_proxy(&proxy, remote_key).await?;
       }
       (None, true) => {
         // Only remote exists - download
-        self.download_proxy(proxy_id, app_handle).await?;
+        self
+          .download_proxy(proxy_id, remote_key, app_handle)
+          .await?;
       }
       (None, false) => {
         // Neither exists - nothing to do
@@ -1582,7 +1992,11 @@ impl SyncEngine {
     Ok(())
   }
 
-  async fn upload_proxy(&self, proxy: &crate::proxy_manager::StoredProxy) -> SyncResult<()> {
+  async fn upload_proxy(
+    &self,
+    proxy: &crate::proxy_manager::StoredProxy,
+    remote_key: &str,
+  ) -> SyncResult<()> {
     let mut updated_proxy = proxy.clone();
     updated_proxy.last_sync = Some(
       std::time::SystemTime::now()
@@ -1594,9 +2008,8 @@ impl SyncEngine {
     let json = serde_json::to_string_pretty(&updated_proxy)
       .map_err(|e| SyncError::SerializationError(format!("Failed to serialize proxy: {e}")))?;
 
-    let remote_key = format!("proxies/{}.json", proxy.id);
     self
-      .upload_config_json(&remote_key, &json, updated_proxy.updated_at.unwrap_or(0))
+      .upload_config_json(remote_key, &json, updated_proxy.updated_at.unwrap_or(0))
       .await?;
 
     // Update local proxy with new last_sync (always write plaintext locally)
@@ -1616,10 +2029,10 @@ impl SyncEngine {
   async fn download_proxy(
     &self,
     proxy_id: &str,
+    remote_key: &str,
     app_handle: Option<&tauri::AppHandle>,
   ) -> SyncResult<()> {
-    let remote_key = format!("proxies/{}.json", proxy_id);
-    let presign = self.client.presign_download(&remote_key).await?;
+    let presign = self.client.presign_download(remote_key).await?;
     let raw = self.client.download_bytes(&presign.url).await?;
 
     let data = encryption::maybe_unseal_after_download(&raw)
@@ -2438,6 +2851,20 @@ impl SyncEngine {
         .save_profile(&profile)
         .map_err(|e| SyncError::IoError(format!("Failed to save cross-OS profile: {e}")))?;
 
+      // The startup scheduler snapshots local profiles before remote recovery.
+      // A profile downloaded in this pass therefore is not queued again, so
+      // fetch its associated proxy now instead of leaving the profile visible
+      // but unusable until the next application restart.
+      if let Some(proxy_id) = &profile.proxy_id {
+        if self.client.is_company_sync() {
+          self
+            .sync_profile_proxy(profile_id, proxy_id, Some(app_handle))
+            .await?;
+        } else {
+          self.sync_proxy(proxy_id, Some(app_handle)).await?;
+        }
+      }
+
       let _ = events::emit("profiles-changed", ());
       let _ = events::emit(
         "profile-sync-status",
@@ -2592,6 +3019,19 @@ impl SyncEngine {
     profile_manager
       .save_profile(&profile)
       .map_err(|e| SyncError::IoError(format!("Failed to save downloaded profile: {e}")))?;
+
+    // Keep profile metadata and its referenced proxy atomic from the user's
+    // perspective. The initial scheduler queue was built before this profile
+    // existed locally and will not otherwise sync the proxy in this run.
+    if let Some(proxy_id) = &profile.proxy_id {
+      if self.client.is_company_sync() {
+        self
+          .sync_profile_proxy(profile_id, proxy_id, Some(app_handle))
+          .await?;
+      } else {
+        self.sync_proxy(proxy_id, Some(app_handle)).await?;
+      }
+    }
 
     let _ = events::emit("profiles-changed", ());
     let _ = events::emit(
@@ -2869,6 +3309,12 @@ impl SyncEngine {
   ) -> SyncResult<()> {
     log::info!("Checking for missing synced entities...");
 
+    // Company-scoped auxiliary data is discovered through each authorized
+    // profile. Never enumerate global proxy/group/VPN collections.
+    if self.client.is_company_sync() {
+      return Ok(());
+    }
+
     // Check for remote proxies not present locally
     let remote_proxies = self.client.list("proxies/").await?;
     for obj in &remote_proxies.objects {
@@ -2892,7 +3338,11 @@ impl SyncEngine {
             "Proxy {} exists remotely but not locally, downloading...",
             proxy_id
           );
-          if let Err(e) = self.download_proxy(proxy_id, Some(app_handle)).await {
+          let remote_key = format!("proxies/{proxy_id}.json");
+          if let Err(e) = self
+            .download_proxy(proxy_id, &remote_key, Some(app_handle))
+            .await
+          {
             log::warn!("Failed to download missing proxy {}: {}", proxy_id, e);
           }
         }
@@ -4212,6 +4662,31 @@ mod tests {
     ));
     #[cfg(windows)]
     assert!(!is_safe_manifest_path(r"C:\Windows\System32\evil.dll"));
+  }
+
+  #[test]
+  fn test_remote_proxy_id_is_merged_before_entity_sync() {
+    let profile_id = uuid::Uuid::new_v4();
+    let local = BrowserProfile {
+      id: profile_id,
+      name: "local".to_string(),
+      proxy_id: None,
+      last_sync: Some(10),
+      ..BrowserProfile::default()
+    };
+    let remote = BrowserProfile {
+      id: profile_id,
+      name: "remote".to_string(),
+      proxy_id: Some("remote-proxy".to_string()),
+      last_sync: None,
+      ..BrowserProfile::default()
+    };
+
+    let merged = merge_synced_profile_metadata(&local, remote, 42);
+
+    assert_eq!(merged.name, "remote");
+    assert_eq!(merged.proxy_id.as_deref(), Some("remote-proxy"));
+    assert_eq!(merged.last_sync, Some(42));
   }
 
   #[test]

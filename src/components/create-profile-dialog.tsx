@@ -84,6 +84,7 @@ interface CreateProfileDialogProps {
     ephemeral?: boolean;
     dnsBlocklist?: string;
     launchHook?: string;
+    startupUrl?: string;
     password?: string;
   }) => Promise<void>;
   selectedGroupId?: string;
@@ -127,6 +128,7 @@ export function CreateProfileDialog({
   const [proxyPopoverOpen, setProxyPopoverOpen] = useState(false);
   const [dnsBlocklist, setDnsBlocklist] = useState<string>("");
   const [launchHook, setLaunchHook] = useState("");
+  const [startupUrl, setStartupUrl] = useState("");
 
   // Wayfern anti-detect states
   const [wayfernConfig, setWayfernConfig] = useState<WayfernConfig>(() => ({
@@ -145,6 +147,7 @@ export function CreateProfileDialog({
     setProfileName("");
     setSelectedProxyId(undefined);
     setLaunchHook("");
+    setStartupUrl("");
   };
 
   const handleTabChange = (value: string) => {
@@ -419,6 +422,7 @@ export function CreateProfileDialog({
           ephemeral,
           dnsBlocklist: dnsBlocklist || undefined,
           launchHook: launchHook.trim() || undefined,
+          startupUrl: startupUrl.trim() || undefined,
           password: passwordToSet,
         });
       } else {
@@ -447,6 +451,7 @@ export function CreateProfileDialog({
               : undefined,
           dnsBlocklist: dnsBlocklist || undefined,
           launchHook: launchHook.trim() || undefined,
+          startupUrl: startupUrl.trim() || undefined,
           password: passwordToSet,
         });
       }
@@ -470,6 +475,7 @@ export function CreateProfileDialog({
     setSelectedBrowser("wayfern");
     setSelectedProxyId(undefined);
     setLaunchHook("");
+    setStartupUrl("");
     setReleaseTypes({});
     setIsLoadingReleaseTypes(false);
     setReleaseTypesError(null);
@@ -1149,6 +1155,27 @@ export function CreateProfileDialog({
                         </div>
 
                         <div className="space-y-2">
+                          <Label htmlFor="startup-url">
+                            {t("createProfile.startupUrl.label")}
+                          </Label>
+                          <Input
+                            id="startup-url"
+                            type="url"
+                            value={startupUrl}
+                            onChange={(e) => {
+                              setStartupUrl(e.target.value);
+                            }}
+                            placeholder={t(
+                              "createProfile.startupUrl.placeholder",
+                            )}
+                            disabled={isCreating}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            {t("createProfile.startupUrl.description")}
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
                           <Label htmlFor="launch-hook-url">
                             {t("createProfile.launchHook.label")}
                           </Label>
@@ -1513,6 +1540,27 @@ export function CreateProfileDialog({
                               {t("createProfile.proxy.noProxiesAvailable")}
                             </div>
                           )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="startup-url-regular">
+                            {t("createProfile.startupUrl.label")}
+                          </Label>
+                          <Input
+                            id="startup-url-regular"
+                            type="url"
+                            value={startupUrl}
+                            onChange={(e) => {
+                              setStartupUrl(e.target.value);
+                            }}
+                            placeholder={t(
+                              "createProfile.startupUrl.placeholder",
+                            )}
+                            disabled={isCreating}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            {t("createProfile.startupUrl.description")}
+                          </p>
                         </div>
 
                         <div className="space-y-2">

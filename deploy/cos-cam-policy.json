@@ -1,0 +1,35 @@
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": [
+        "cos:HeadBucket",
+        "cos:GetBucket",
+        "cos:GetBucketObjectVersions",
+        "cos:GetBucketVersioning",
+        "cos:PutBucketVersioning",
+        "cos:GetBucketEncryption",
+        "cos:PutBucketEncryption",
+        "cos:GetBucketLifecycle",
+        "cos:PutBucketLifecycle",
+        "cos:GetBucketAcl",
+        "cos:GetObject",
+        "cos:HeadObject",
+        "cos:PutObject",
+        "cos:DeleteObject",
+        "cos:DeleteMultipleObjects",
+        "cos:InitiateMultipartUpload",
+        "cos:UploadPart",
+        "cos:CompleteMultipartUpload",
+        "cos:AbortMultipartUpload",
+        "cos:ListMultipartUploads",
+        "cos:ListParts"
+      ],
+      "resource": [
+        "qcs::cos:REGION:uid/APPID:BUCKET_NAME",
+        "qcs::cos:REGION:uid/APPID:BUCKET_NAME/*"
+      ]
+    }
+  ]
+}

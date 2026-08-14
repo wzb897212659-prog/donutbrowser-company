@@ -34,6 +34,7 @@ pub enum SyncWorkItem {
 #[derive(Clone, Copy)]
 enum TokenSource {
   Cloud,
+  Company,
   SelfHosted,
 }
 
@@ -78,6 +79,19 @@ impl SyncSubscription {
         return Ok(None);
       };
       return Ok(Some(Self::new(url, token, TokenSource::Cloud, work_tx)));
+    }
+
+    if crate::company_auth::COMPANY_AUTH.is_logged_in().await {
+      let token = crate::company_auth::COMPANY_AUTH
+        .get_or_refresh_access_token(app_handle)
+        .await
+        .map_err(|e| format!("Failed to get company sync token: {e}"))?;
+      return Ok(Some(Self::new(
+        crate::company_auth::COMPANY_SYNC_URL.to_string(),
+        token,
+        TokenSource::Company,
+        work_tx,
+      )));
     }
 
     // Fall back to self-hosted settings
@@ -175,6 +189,11 @@ impl SyncSubscription {
         .get_or_refresh_sync_token()
         .await
         .map_err(|e| format!("Failed to refresh cloud sync token: {e}")),
+      TokenSource::Company => crate::company_auth::COMPANY_AUTH
+        .get_or_refresh_access_token(app_handle)
+        .await
+        .map(Some)
+        .map_err(|e| format!("Failed to refresh company sync token: {e}")),
       TokenSource::SelfHosted => SettingsManager::instance()
         .get_sync_token(app_handle)
         .await

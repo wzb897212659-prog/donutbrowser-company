@@ -594,6 +594,96 @@ impl SettingsManager {
     &self,
     _app_handle: &tauri::AppHandle,
   ) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    self.get_sync_token_from_disk()
+  }
+
+  pub(crate) fn store_secret_token(
+    &self,
+    path: &std::path::Path,
+    header: &[u8; 5],
+    token: &str,
+  ) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = path.parent() {
+      std::fs::create_dir_all(parent)?;
+    }
+    let vault_password = Self::get_vault_password();
+    let salt_bytes: [u8; 16] = rand::rng().random();
+    let salt =
+      SaltString::encode_b64(&salt_bytes).map_err(|e| format!("Failed to encode salt: {e}"))?;
+    let password_hash = Argon2::default()
+      .hash_password(vault_password.as_bytes(), &salt)
+      .map_err(|e| format!("Argon2 key derivation failed: {e}"))?;
+    let hash_bytes = password_hash.hash.ok_or("Missing password hash")?;
+    let key_bytes: [u8; 32] = hash_bytes.as_bytes()[..32].try_into()?;
+    let key = Key::<Aes256Gcm>::from(key_bytes);
+    let cipher = Aes256Gcm::new(&key);
+    let nonce_bytes: [u8; 12] = rand::rng().random();
+    let ciphertext = cipher
+      .encrypt(&Nonce::from(nonce_bytes), token.as_bytes())
+      .map_err(|e| format!("Encryption failed: {e}"))?;
+    let mut data = Vec::new();
+    data.extend_from_slice(header);
+    data.push(2);
+    data.push(salt.as_str().len() as u8);
+    data.extend_from_slice(salt.as_str().as_bytes());
+    data.extend_from_slice(&nonce_bytes);
+    data.extend_from_slice(&(ciphertext.len() as u32).to_le_bytes());
+    data.extend_from_slice(&ciphertext);
+    std::fs::write(path, data)?;
+    crate::app_dirs::restrict_to_owner(path);
+    Ok(())
+  }
+
+  pub(crate) fn load_secret_token(
+    &self,
+    path: &std::path::Path,
+    header: &[u8; 5],
+  ) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    if !path.exists() {
+      return Ok(None);
+    }
+    let data = std::fs::read(path)?;
+    if data.len() < 7 || &data[..5] != header || data[5] != 2 {
+      return Ok(None);
+    }
+    let salt_len = data[6] as usize;
+    let mut offset = 7;
+    if offset + salt_len + 12 + 4 > data.len() {
+      return Ok(None);
+    }
+    let salt = SaltString::from_b64(std::str::from_utf8(&data[offset..offset + salt_len])?)
+      .map_err(|e| format!("Invalid salt: {e}"))?;
+    offset += salt_len;
+    let nonce_bytes: [u8; 12] = data[offset..offset + 12].try_into()?;
+    offset += 12;
+    let ciphertext_len = u32::from_le_bytes(data[offset..offset + 4].try_into()?) as usize;
+    offset += 4;
+    if offset + ciphertext_len > data.len() {
+      return Ok(None);
+    }
+    let password_hash = Argon2::default()
+      .hash_password(Self::get_vault_password().as_bytes(), &salt)
+      .map_err(|e| format!("Argon2 key derivation failed: {e}"))?;
+    let hash_bytes = password_hash.hash.ok_or("Missing password hash")?;
+    let key_bytes: [u8; 32] = hash_bytes.as_bytes()[..32].try_into()?;
+    let key = Key::<Aes256Gcm>::from(key_bytes);
+    let cipher = Aes256Gcm::new(&key);
+    let plaintext = cipher
+      .decrypt(
+        &Nonce::from(nonce_bytes),
+        &data[offset..offset + ciphertext_len],
+      )
+      .map_err(|e| format!("Decryption failed: {e}"))?;
+    Ok(String::from_utf8(plaintext).ok())
+  }
+
+  /// Read the encrypted sync token without requiring an application handle.
+  ///
+  /// The handle was retained on the async command for API compatibility, but
+  /// the v2 token format is entirely file-backed. Internal services such as
+  /// the company profile lease manager do not have an AppHandle available and
+  /// need the same token that the sync engine uses.
+  pub fn get_sync_token_from_disk(&self) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let token_file = self.get_settings_dir().join("sync_token.dat");
 
     if !token_file.exists() {
@@ -1297,6 +1387,26 @@ mod tests {
         .to_string_lossy()
         .ends_with("table_sorting.json"),
       "Sorting file should end with table_sorting.json"
+    );
+  }
+
+  #[test]
+  fn test_secret_token_backup_roundtrip() {
+    let (manager, _temp_dir, _guard) = create_test_settings_manager();
+    let path = manager.get_settings_dir().join("company-access.token");
+    let token = "header.payload.signature";
+
+    manager
+      .store_secret_token(&path, b"DBCTK", token)
+      .expect("Should store encrypted token backup");
+    let loaded = manager
+      .load_secret_token(&path, b"DBCTK")
+      .expect("Should read encrypted token backup");
+
+    assert_eq!(loaded.as_deref(), Some(token));
+    assert_ne!(
+      fs::read(&path).expect("Should read token file"),
+      token.as_bytes()
     );
   }
 }

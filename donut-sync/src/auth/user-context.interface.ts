@@ -7,4 +7,6 @@ export interface UserContext {
   prefix: string;
   profileLimit: number; // 0 for unlimited (self-hosted); effective (team) limit for team members
   sub?: string; // the authenticated user id (cloud only)
+  accessToken?: string; // forwarded only to the trusted control API for per-profile ACL checks
+  companyManaged?: boolean;
 }

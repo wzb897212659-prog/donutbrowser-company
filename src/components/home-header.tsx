@@ -7,7 +7,7 @@ import { GoPlus } from "react-icons/go";
 import { LuChevronLeft, LuChevronRight, LuSearch, LuX } from "react-icons/lu";
 import { getCurrentOS } from "@/lib/browser-utils";
 import { cn } from "@/lib/utils";
-import type { GroupWithCount } from "@/types";
+import type { CompanyAdminUser, GroupWithCount } from "@/types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -38,6 +38,9 @@ interface Props {
   totalProfiles: number;
   selectedGroupId: string | null;
   onGroupSelect: (groupId: string) => void;
+  adminFilters?: CompanyAdminUser[];
+  showAdminFilters?: boolean;
+  unassignedCount?: number;
   pageTitle?: string;
 }
 
@@ -49,6 +52,9 @@ const HomeHeader = ({
   totalProfiles,
   selectedGroupId,
   onGroupSelect,
+  adminFilters = [],
+  showAdminFilters = false,
+  unassignedCount = 0,
   pageTitle,
 }: Props) => {
   const { t } = useTranslation();
@@ -258,6 +264,66 @@ const HomeHeader = ({
                 </button>
               );
             })()}
+            {adminFilters.map((admin) => {
+              const filterId = `__admin__:${admin.id}`;
+              const active = selectedGroupId === filterId;
+              return (
+                <button
+                  key={filterId}
+                  type="button"
+                  title={admin.username}
+                  onClick={() => {
+                    onGroupSelect(active ? ALL_FILTER_ID : filterId);
+                  }}
+                  className={cn(
+                    "flex h-7 shrink-0 items-center gap-1.5 px-1 text-xs transition-colors duration-100",
+                    active
+                      ? "font-medium text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <span className="max-w-40 truncate">
+                    {admin.active
+                      ? admin.username
+                      : t("companyAdmin.disabledFilter", {
+                          username: admin.username,
+                        })}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground tabular-nums">
+                    {admin.assignedProfileCount}
+                  </span>
+                </button>
+              );
+            })}
+            {showAdminFilters && (
+              <button
+                type="button"
+                onClick={() => {
+                  onGroupSelect(
+                    selectedGroupId === "__unassigned__"
+                      ? ALL_FILTER_ID
+                      : "__unassigned__",
+                  );
+                }}
+                className={cn(
+                  "flex h-7 shrink-0 items-center gap-1.5 px-1 text-xs transition-colors duration-100",
+                  selectedGroupId === "__unassigned__"
+                    ? "font-medium text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <span>{t("companyAdmin.unassigned")}</span>
+                <span className="text-[11px] text-muted-foreground tabular-nums">
+                  {unassignedCount}
+                </span>
+              </button>
+            )}
+            {showAdminFilters && (
+              <span
+                aria-hidden="true"
+                className="h-4 w-px shrink-0 bg-border"
+              />
+            )}
             {groups.map((group) => {
               const active = selectedGroupId === group.id;
               return (

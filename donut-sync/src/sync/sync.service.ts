@@ -268,9 +268,46 @@ export class SyncService implements OnModuleInit {
     throw new ForbiddenException("Access denied to this key");
   }
 
+  private async authorizeCompanyKey(
+    ctx: UserContext,
+    key: string,
+    action: "read" | "write" | "delete" | "list",
+  ): Promise<{ allowedProfileIds?: string[] } | undefined> {
+    if (!ctx.companyManaged) return undefined;
+    if (
+      !this.backendInternalUrl ||
+      !this.backendInternalKey ||
+      !ctx.accessToken
+    ) {
+      throw new ForbiddenException("Company authorization is unavailable");
+    }
+    const relativeKey = key.startsWith(ctx.prefix)
+      ? key.substring(ctx.prefix.length)
+      : key;
+    const response = await fetch(
+      `${this.backendInternalUrl}/api/internal/sync/authorize`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-key": this.backendInternalKey,
+        },
+        body: JSON.stringify({
+          token: ctx.accessToken,
+          key: relativeKey,
+          action,
+        }),
+      },
+    );
+    if (!response.ok)
+      throw new ForbiddenException("Access denied to this profile");
+    return (await response.json()) as { allowedProfileIds?: string[] };
+  }
+
   async stat(dto: StatRequestDto, ctx: UserContext): Promise<StatResponseDto> {
     const key = this.scopeKey(ctx, dto.key);
     this.validateKeyAccess(ctx, key);
+    await this.authorizeCompanyKey(ctx, key, "read");
 
     try {
       const response = await this.s3Client.send(
@@ -308,6 +345,7 @@ export class SyncService implements OnModuleInit {
   ): Promise<PresignUploadResponseDto> {
     const key = this.scopeKey(ctx, dto.key);
     this.validateKeyAccess(ctx, key);
+    await this.authorizeCompanyKey(ctx, key, "write");
 
     // Check profile limit for cloud users
     if (ctx.mode === "cloud" && ctx.profileLimit > 0) {
@@ -356,6 +394,7 @@ export class SyncService implements OnModuleInit {
   ): Promise<PresignDownloadResponseDto> {
     const key = this.scopeKey(ctx, dto.key);
     this.validateKeyAccess(ctx, key);
+    await this.authorizeCompanyKey(ctx, key, "read");
 
     const expiresIn = clampExpiresIn(dto.expiresIn);
     const expiresAt = new Date(Date.now() + expiresIn * 1000);
@@ -379,6 +418,7 @@ export class SyncService implements OnModuleInit {
   ): Promise<DeleteResponseDto> {
     const key = this.scopeKey(ctx, dto.key);
     this.validateKeyAccess(ctx, key);
+    await this.authorizeCompanyKey(ctx, key, "delete");
 
     let deleted = false;
     let tombstoneCreated = false;
@@ -397,6 +437,8 @@ export class SyncService implements OnModuleInit {
 
     if (dto.tombstoneKey) {
       const scopedTombstoneKey = this.scopeKey(ctx, dto.tombstoneKey);
+      this.validateKeyAccess(ctx, scopedTombstoneKey);
+      await this.authorizeCompanyKey(ctx, scopedTombstoneKey, "write");
       const tombstoneData = JSON.stringify({
         id: key,
         deleted_at: dto.deletedAt || new Date().toISOString(),
@@ -427,9 +469,17 @@ export class SyncService implements OnModuleInit {
 
   async list(dto: ListRequestDto, ctx?: UserContext): Promise<ListResponseDto> {
     const prefix = ctx ? this.scopeKey(ctx, dto.prefix) : dto.prefix;
+    let companyAuthorization: { allowedProfileIds?: string[] } | undefined;
     // Enforce scope on the read side too, so a crafted absolute prefix can't
     // enumerate another tenant's objects.
-    if (ctx) this.validateKeyAccess(ctx, prefix);
+    if (ctx) {
+      this.validateKeyAccess(ctx, prefix);
+      companyAuthorization = await this.authorizeCompanyKey(
+        ctx,
+        prefix,
+        "list",
+      );
+    }
 
     const response = await this.s3Client.send(
       new ListObjectsV2Command({
@@ -441,9 +491,20 @@ export class SyncService implements OnModuleInit {
     );
 
     const userPrefix = ctx?.prefix || "";
+    const allowedProfileIds = companyAuthorization?.allowedProfileIds
+      ? new Set(companyAuthorization.allowedProfileIds)
+      : undefined;
     const objects = (response.Contents || [])
       // Don't leak donut-sync's internal manifest object to clients.
       .filter((obj) => !(obj.Key || "").endsWith(MANIFEST_KEY))
+      .filter((obj) => {
+        if (!allowedProfileIds || !ctx?.companyManaged) return true;
+        const key = (obj.Key || "").startsWith(ctx.prefix)
+          ? (obj.Key || "").substring(ctx.prefix.length)
+          : obj.Key || "";
+        const match = /^profiles\/([0-9a-fA-F-]{36})(?:\/|$)/.exec(key);
+        return !match || allowedProfileIds.has(match[1].toLowerCase());
+      })
       .map((obj) => {
         let key = obj.Key || "";
         if (userPrefix && key.startsWith(userPrefix)) {
@@ -489,6 +550,7 @@ export class SyncService implements OnModuleInit {
       dto.items.map(async (item) => {
         const key = this.scopeKey(ctx, item.key);
         this.validateKeyAccess(ctx, key);
+        await this.authorizeCompanyKey(ctx, key, "write");
 
         const command = new PutCmd({
           Bucket: this.bucket,
@@ -550,6 +612,7 @@ export class SyncService implements OnModuleInit {
       dto.keys.map(async (rawKey) => {
         const key = this.scopeKey(ctx, rawKey);
         this.validateKeyAccess(ctx, key);
+        await this.authorizeCompanyKey(ctx, key, "read");
 
         const command = new GetObjectCommand({
           Bucket: this.bucket,
@@ -580,6 +643,7 @@ export class SyncService implements OnModuleInit {
     // verbatim) could wipe an entire shared namespace. Enforce scope, and
     // refuse an empty scoped prefix (which would match the whole scope).
     this.validateKeyAccess(ctx, prefix);
+    await this.authorizeCompanyKey(ctx, prefix, "delete");
     if (ctx.mode === "cloud" && prefix.length === 0) {
       throw new ForbiddenException("Refusing to delete an empty prefix");
     }
@@ -626,6 +690,7 @@ export class SyncService implements OnModuleInit {
     if (dto.tombstoneKey && deletedCount > 0) {
       const scopedTombstoneKey = this.scopeKey(ctx, dto.tombstoneKey);
       this.validateKeyAccess(ctx, scopedTombstoneKey);
+      await this.authorizeCompanyKey(ctx, scopedTombstoneKey, "write");
       const tombstoneData = JSON.stringify({
         prefix: dto.prefix,
         deleted_at: dto.deletedAt || new Date().toISOString(),
@@ -683,6 +748,16 @@ export class SyncService implements OnModuleInit {
       startWith(0),
       switchMap(async () => {
         const events: SubscribeEventDto[] = [];
+        const companyAuthorization = ctx.companyManaged
+          ? await this.authorizeCompanyKey(
+              ctx,
+              `${ctx.prefix}profiles/`,
+              "list",
+            )
+          : undefined;
+        const allowedCompanyProfiles = companyAuthorization?.allowedProfileIds
+          ? new Set(companyAuthorization.allowedProfileIds)
+          : undefined;
 
         // Phase 1 — cheap HEAD on each scope's manifest. This is the
         // steady-state cost (Class B). If no manifest changed since the
@@ -761,6 +836,17 @@ export class SyncService implements OnModuleInit {
                 if (relativeKey === MANIFEST_KEY) continue;
                 if (!basePrefixes.some((bp) => relativeKey.startsWith(bp))) {
                   continue;
+                }
+                if (ctx.companyManaged) {
+                  const match = /^profiles\/([0-9a-fA-F-]{36})(?:\/|$)/.exec(
+                    relativeKey,
+                  );
+                  if (
+                    !match ||
+                    !allowedCompanyProfiles?.has(match[1].toLowerCase())
+                  ) {
+                    continue;
+                  }
                 }
 
                 const lastModified = obj.LastModified?.toISOString() || "";

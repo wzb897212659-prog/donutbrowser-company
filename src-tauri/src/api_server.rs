@@ -30,6 +30,7 @@ pub struct ApiProfile {
   pub version: String,
   pub proxy_id: Option<String>,
   pub launch_hook: Option<String>,
+  pub startup_url: Option<String>,
   pub process_id: Option<u32>,
   pub last_launch: Option<u64>,
   pub release_type: String,
@@ -66,6 +67,7 @@ pub struct CreateProfileRequest {
   pub proxy_id: Option<String>,
   pub vpn_id: Option<String>,
   pub launch_hook: Option<String>,
+  pub startup_url: Option<String>,
   pub release_type: Option<String>,
   /// Wayfern fingerprint/config. Send only when `browser` is `"wayfern"`.
   /// Omit it, or pass an empty object `{}`, to have a fresh fingerprint
@@ -87,6 +89,7 @@ pub struct UpdateProfileRequest {
   pub proxy_id: Option<String>,
   pub vpn_id: Option<String>,
   pub launch_hook: Option<String>,
+  pub startup_url: Option<String>,
   pub release_type: Option<String>,
   pub group_id: Option<String>,
   pub tags: Option<Vec<String>>,
@@ -769,6 +772,7 @@ async fn get_profiles() -> Result<Json<ApiProfilesResponse>, StatusCode> {
           version: profile.version.clone(),
           proxy_id: profile.proxy_id.clone(),
           launch_hook: profile.launch_hook.clone(),
+          startup_url: profile.startup_url.clone(),
           process_id: profile.process_id,
           last_launch: profile.last_launch,
           release_type: profile.release_type.clone(),
@@ -822,6 +826,7 @@ async fn get_profile(
             version: profile.version.clone(),
             proxy_id: profile.proxy_id.clone(),
             launch_hook: profile.launch_hook.clone(),
+            startup_url: profile.startup_url.clone(),
             process_id: profile.process_id,
             last_launch: profile.last_launch,
             release_type: profile.release_type.clone(),
@@ -953,6 +958,7 @@ async fn create_profile(
       false,
       None,
       request.launch_hook.clone(),
+      request.startup_url.clone(),
     )
     .await
   {
@@ -986,6 +992,7 @@ async fn create_profile(
           version: profile.version,
           proxy_id: profile.proxy_id,
           launch_hook: profile.launch_hook,
+          startup_url: profile.startup_url,
           process_id: profile.process_id,
           last_launch: profile.last_launch,
           release_type: profile.release_type,
@@ -1083,6 +1090,17 @@ async fn update_profile(
     };
 
     if let Err(e) = profile_manager.update_profile_launch_hook(&state.app_handle, &id, normalized) {
+      return Err(manager_error_response(e));
+    }
+  }
+
+  if let Some(startup_url) = request.startup_url {
+    let normalized = if startup_url.trim().is_empty() {
+      None
+    } else {
+      Some(startup_url)
+    };
+    if let Err(e) = profile_manager.update_profile_startup_url(&state.app_handle, &id, normalized) {
       return Err(manager_error_response(e));
     }
   }

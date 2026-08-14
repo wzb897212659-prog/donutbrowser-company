@@ -31,6 +31,7 @@ import {
   LuSquare,
   LuTrash2,
   LuTriangleAlert,
+  LuUserCog,
   LuUsers,
 } from "react-icons/lu";
 import { DeleteConfirmationDialog } from "@/components/delete-confirmation-dialog";
@@ -1145,6 +1146,7 @@ interface ProfilesDataTableProps {
   onBulkStop?: () => void;
   bulkActionsUnlocked?: boolean;
   onBulkExtensionGroupAssignment?: () => void;
+  onBulkCompanyTransfer?: () => void;
   onAssignExtensionGroup?: (profileIds: string[]) => void;
   onOpenProfileSyncDialog?: (profile: BrowserProfile) => void;
   onToggleProfileSync?: (profile: BrowserProfile) => void;
@@ -1193,6 +1195,7 @@ export function ProfilesDataTable({
   onBulkStop,
   bulkActionsUnlocked = false,
   onBulkExtensionGroupAssignment,
+  onBulkCompanyTransfer,
   onAssignExtensionGroup,
   onOpenProfileSyncDialog,
   onToggleProfileSync,
@@ -2401,8 +2404,7 @@ export function ProfilesDataTable({
       },
       {
         accessorKey: "name",
-        // The only column without a fixed width: table-fixed hands it all
-        // remaining space as the window grows or shrinks.
+        // Company list business columns share all remaining width equally.
         meta: { flexWidth: true },
         // The Name header doubles as the sort control: clicking opens a menu to
         // sort by name (A–Z / Z–A) or by creation date (newest / oldest), so
@@ -2587,7 +2589,7 @@ export function ProfilesDataTable({
       },
       {
         id: "tags",
-        size: 100,
+        meta: { flexWidth: true },
         header: ({ table }) => {
           const meta = table.options.meta as TableMeta;
           return meta.t("profileTable.tagsHeader");
@@ -2620,7 +2622,7 @@ export function ProfilesDataTable({
       },
       {
         id: "note",
-        size: 80,
+        meta: { flexWidth: true },
         header: ({ table }) => {
           const meta = table.options.meta as TableMeta;
           return meta.t("profileTable.noteHeader");
@@ -2651,7 +2653,7 @@ export function ProfilesDataTable({
       },
       {
         id: "proxy",
-        size: 110,
+        meta: { flexWidth: true },
         header: ({ table }) => {
           const meta = table.options.meta as TableMeta;
           return meta.t("profiles.table.proxy");
@@ -2899,7 +2901,7 @@ export function ProfilesDataTable({
       },
       {
         id: "ext",
-        size: 95,
+        meta: { flexWidth: true },
         header: ({ table }) => {
           const meta = table.options.meta as TableMeta;
           return meta.t("profiles.table.ext");
@@ -2912,7 +2914,7 @@ export function ProfilesDataTable({
       },
       {
         id: "dns",
-        size: 95,
+        meta: { flexWidth: true },
         header: ({ table }) => {
           const meta = table.options.meta as TableMeta;
           return meta.t("profiles.table.dns");
@@ -3370,6 +3372,15 @@ export function ProfilesDataTable({
             size="icon"
           >
             <LuCookie />
+          </DataTableActionBarAction>
+        )}
+        {onBulkCompanyTransfer && (
+          <DataTableActionBarAction
+            tooltip={t("companyAdmin.transferAction")}
+            onClick={onBulkCompanyTransfer}
+            size="icon"
+          >
+            <LuUserCog />
           </DataTableActionBarAction>
         )}
         {onBulkDelete && (

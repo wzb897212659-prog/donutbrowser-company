@@ -1,0 +1,10 @@
+ip2region IPv4 database
+
+Source: https://github.com/lionsoul2014/ip2region
+Pinned release: v3.17.0
+Bundled file: data/ip2region_v4.xdb
+Rust parser: xdb-parse 0.2.x
+
+The ip2region Rust binding and xdb-parse library are distributed under the
+Apache-2.0 license (xdb-parse is dual MIT OR Apache-2.0). The database is kept
+at its original field format: Country|Province|City|ISP|ISO country code.

@@ -1,8 +1,10 @@
 packages:
   - nodecar
   - donut-sync
+  - company-control
 
 onlyBuiltDependencies:
+  - argon2
   - '@biomejs/biome'
   - '@nestjs/core'
   - '@tailwindcss/oxide'
@@ -34,7 +36,9 @@ overrides:
   '@babel/core@<7.29.6': '>=7.29.6 <8'
 
 allowBuilds:
+  argon2: true
   '@nestjs/core': true
+  esbuild: true
   sharp: true
   unrs-resolver: true
 

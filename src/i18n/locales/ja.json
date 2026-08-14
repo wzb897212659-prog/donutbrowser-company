@@ -381,7 +381,12 @@
       "description": "ディスク上のプロファイルデータを暗号化します。起動に必要です。"
     },
     "downloadingSubtitle": "ダウンロード中…",
-    "browsersDownloading": "ブラウザをダウンロード中です。ダウンロードが完了するとプロファイルを作成できます。"
+    "browsersDownloading": "ブラウザをダウンロード中です。ダウンロードが完了するとプロファイルを作成できます。",
+    "startupUrl": {
+      "label": "Startup page URL",
+      "description": "Open this page automatically when the profile starts.",
+      "placeholder": "https://example.com"
+    }
   },
   "deleteDialog": {
     "title": "プロファイルを削除",
@@ -429,6 +434,11 @@
     "noProxies": "プロキシが設定されていません",
     "noProxiesDescription": "ブラウザトラフィックをルーティングするためのプロキシを追加してください。",
     "form": {
+      "quickInput": "Paste proxy details",
+      "quickInputPlaceholder": "IP:port username password",
+      "quickInputHint": "Spaces and tabs are supported. Pasting fills the fields below.",
+      "quickInputInvalid": "Could not recognize the proxy format",
+      "quickInputRecognized": "Proxy details filled automatically",
       "name": "名前",
       "namePlaceholder": "プロキシ名を入力",
       "type": "タイプ",
@@ -633,6 +643,12 @@
       "linkCodeLabel": "ログインコード",
       "linkCodePlaceholder": "ウェブサイトのコードを貼り付け",
       "signInTitle": "サインイン",
+      "companyLoginInstructions": "Sign in with your company browser account.",
+      "username": "Username",
+      "usernamePlaceholder": "Enter your username",
+      "password": "Password",
+      "passwordPlaceholder": "Enter your password",
+      "companyLogin": "Sign in",
       "verifyAndLogin": "認証してログイン",
       "loggingIn": "ログイン中...",
       "connected": "接続済み",
@@ -1167,7 +1183,8 @@
       "security": "セキュリティ",
       "delete": "プロファイルを削除",
       "activity": "アクティビティ",
-      "launchHook": "起動フック"
+      "launchHook": "起動フック",
+      "launchSettings": "Launch settings"
     },
     "sectionDesc": {
       "fingerprint": "フィンガープリント対策スクリプトに対するこのプロファイルの表示を設定します。",
@@ -1202,6 +1219,12 @@
       "syncing": "同期中",
       "synced": "同期済み",
       "error": "エラー"
+    },
+    "startupUrl": {
+      "label": "Startup page URL",
+      "description": "Open this page automatically when the profile starts.",
+      "placeholder": "https://example.com",
+      "invalidUrlHint": "Enter a complete HTTP or HTTPS URL."
     }
   },
   "extensions": {
@@ -1802,7 +1825,8 @@
     "updateChecksumsUnavailable": "アップデート {{version}} のチェックサムファイルを取得できなかったため、検証できませんでした。アップデートはインストールされませんでした。後で再試行されます。",
     "updateChecksumMismatch": "ダウンロードしたアップデートファイル {{file}} はチェックサム検証に失敗したため破棄されました。もう一度お試しください。",
     "nameCannotBeEmpty": "名前を空にすることはできません",
-    "wayfernVersionNotAvailable": "Wayfernのバージョン{{requested}}はダウンロードできません。現在のバージョンは{{current}}です。"
+    "wayfernVersionNotAvailable": "Wayfernのバージョン{{requested}}はダウンロードできません。現在のバージョンは{{current}}です。",
+    "invalidStartupUrl": "Enter a valid startup page URL beginning with http:// or https://."
   },
   "rail": {
     "profiles": "プロファイル",
@@ -2017,6 +2041,56 @@
     "invalidFingerprintDescription": "フィンガープリント設定に無効な JSON が含まれています。詳細設定を確認してください。",
     "saveFailed": "設定の保存に失敗しました",
     "unknownError": "不明なエラーが発生しました"
+  },
+  "companyAdmin": {
+    "title": "Account management",
+    "description": "Create administrators, manage access, and review assigned profiles.",
+    "createAdmin": "New administrator",
+    "username": "Username",
+    "role": "Role",
+    "profileCount": "Profiles",
+    "createdAt": "Created",
+    "roles": {
+      "admin": "Administrator",
+      "superAdmin": "Super administrator"
+    },
+    "createTitle": "Create administrator",
+    "createDescription": "Create a normal administrator account for company profile access.",
+    "password": "New password",
+    "confirmPassword": "Confirm password",
+    "passwordTooShort": "Password must be at least 12 characters.",
+    "passwordMismatch": "The two passwords do not match.",
+    "createSuccess": "Administrator created.",
+    "resetPassword": "Reset password",
+    "resetTitle": "Reset administrator password",
+    "resetDescription": "Set a new password for {{username}}. Their existing sessions will be revoked.",
+    "resetSuccess": "Password reset. Existing sessions have been revoked.",
+    "enableSuccess": "Administrator enabled.",
+    "disableSuccess": "Administrator disabled.",
+    "disabledFilter": "{{username}} (disabled)",
+    "unassigned": "Unassigned",
+    "transferAction": "Transfer to administrator",
+    "transferTitle": "Transfer selected profiles",
+    "transferDescription": "Transfer {{count}} selected profile(s) to one administrator.",
+    "transferTarget": "Target administrator",
+    "selectAdmin": "Select an administrator",
+    "transferWarning": "The previous administrators will lose access. Profiles currently in use cannot be transferred.",
+    "transferConfirm": "Confirm transfer",
+    "transferSuccess": "Transferred {{count}} profile(s).",
+    "errors": {
+      "notLoggedIn": "Sign in to the company account first.",
+      "superAdminRequired": "Only a super administrator can perform this action.",
+      "requestFailed": "The company management request failed. Please try again.",
+      "invalidResponse": "The company server returned an invalid response.",
+      "invalidUsername": "Username must be 3-64 characters and use letters, numbers, dots, underscores, or hyphens.",
+      "passwordTooLong": "Password cannot exceed 256 characters.",
+      "usernameExists": "This username already exists.",
+      "userNotFound": "Administrator account not found.",
+      "superAdminPasswordResetForbidden": "Super administrator passwords cannot be reset here.",
+      "invalidBatchTransfer": "Select between 1 and 500 valid profiles to transfer.",
+      "activeAdminNotFound": "The target administrator does not exist or is disabled.",
+      "profilesLocked": "{{count}} selected profile(s) are currently in use. Close them before transferring."
+    }
   },
   "cookieCopy": {
     "noOtherTargets": "他に Wayfern プロファイルが選択されていません"

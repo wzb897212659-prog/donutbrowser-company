@@ -650,6 +650,7 @@ mod tests {
       proxy_id: None,
       vpn_id: None,
       launch_hook: None,
+      startup_url: None,
       last_launch: None,
       release_type: "stable".to_string(),
       wayfern_config: None,

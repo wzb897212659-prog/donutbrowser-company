@@ -1,6 +1,6 @@
 import { execSync, execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MANIFEST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -31,10 +31,16 @@ const isWindows = TARGET.includes("windows");
 
 // Determine source directory
 let srcDir;
+const configuredTargetDir = process.env.CARGO_TARGET_DIR;
+const targetRoot = configuredTargetDir
+  ? isAbsolute(configuredTargetDir)
+    ? configuredTargetDir
+    : resolve(MANIFEST_DIR, configuredTargetDir)
+  : join(MANIFEST_DIR, "target");
 if (TARGET === HOST_TARGET || TARGET === "unknown") {
-  srcDir = join(MANIFEST_DIR, "target", PROFILE === "release" ? "release" : "debug");
+  srcDir = join(targetRoot, PROFILE === "release" ? "release" : "debug");
 } else {
-  srcDir = join(MANIFEST_DIR, "target", TARGET, PROFILE === "release" ? "release" : "debug");
+  srcDir = join(targetRoot, TARGET, PROFILE === "release" ? "release" : "debug");
 }
 
 const destDir = join(MANIFEST_DIR, "binaries");

@@ -71,7 +71,7 @@ export function AccountPage({
   // Self-hosted and cloud are mutually exclusive — both share the same sync
   // engine and a profile can't be sync'd to two backends. The tab trigger is
   // disabled here AND the backend rejects mixed state (see `save_sync_settings`
-  // / `cloud_logout`), so even if someone bypasses the UI we don't end up
+  // / company logout), so even if someone bypasses the UI we don't end up
   // with split-brain.
   const selfHostedDisabled = isLoggedIn || isCloudLoading;
 
@@ -91,8 +91,8 @@ export function AccountPage({
     setIsLoggingOut(true);
     try {
       await logout();
-      // The backend wipes sync URL + token as part of cloud_logout (see
-      // `cloud_auth::cloud_logout`); pull the now-empty settings back into
+      // The backend wipes sync URL + token as part of company logout; pull
+      // the now-empty settings back into
       // the form so a user who flips to the Self-hosted tab doesn't see the
       // pre-logout production URL still sitting there.
       await loadSelfHostedSettings();

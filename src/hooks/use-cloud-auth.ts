@@ -7,7 +7,10 @@ interface UseCloudAuthReturn {
   user: CloudUser | null;
   isLoggedIn: boolean;
   isLoading: boolean;
-  exchangeDeviceCode: (code: string) => Promise<CloudAuthState>;
+  loginWithPassword: (
+    username: string,
+    password: string,
+  ) => Promise<CloudAuthState>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<CloudUser>;
 }
@@ -18,7 +21,7 @@ export function useCloudAuth(): UseCloudAuthReturn {
 
   const loadUser = useCallback(async () => {
     try {
-      const state = await invoke<CloudAuthState | null>("cloud_get_user");
+      const state = await invoke<CloudAuthState | null>("company_get_user");
       setAuthState(state);
     } catch (error) {
       console.error("Failed to load cloud auth state:", error);
@@ -49,24 +52,13 @@ export function useCloudAuth(): UseCloudAuthReturn {
     };
   }, [loadUser]);
 
-  const exchangeDeviceCode = useCallback(
-    async (code: string): Promise<CloudAuthState> => {
-      const state = await invoke<CloudAuthState>("cloud_exchange_device_code", {
-        code,
-      });
-      setAuthState(state);
-      return state;
-    },
-    [],
-  );
-
   const logout = useCallback(async () => {
-    await invoke("cloud_logout");
+    await invoke("company_logout");
     setAuthState(null);
   }, []);
 
   const refreshProfile = useCallback(async (): Promise<CloudUser> => {
-    const user = await invoke<CloudUser>("cloud_refresh_profile");
+    const user = await invoke<CloudUser>("company_refresh");
     setAuthState((prev) =>
       prev
         ? { ...prev, user }
@@ -79,7 +71,14 @@ export function useCloudAuth(): UseCloudAuthReturn {
     user: authState?.user ?? null,
     isLoggedIn: authState !== null,
     isLoading,
-    exchangeDeviceCode,
+    loginWithPassword: async (username: string, password: string) => {
+      const state = await invoke<CloudAuthState>("company_login", {
+        username,
+        password,
+      });
+      setAuthState(state);
+      return state;
+    },
     logout,
     refreshProfile,
   };
