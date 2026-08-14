@@ -5,6 +5,10 @@ extend-exclude = [
     # Auto-generated from commit subjects by release.yml; typos here originate
     # in commit messages, which are immutable, so don't spell-check it.
     "CHANGELOG.md",
+    # Generated unified diff includes unchanged Chromium upstream context,
+    # including upstream spellings outside our source delta. Source-kit files,
+    # scripts, docs, and the Chromium-side added files are checked separately.
+    "company-chromium/patches/*.patch",
 ]
 
 [default.extend-words]

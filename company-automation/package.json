@@ -1,0 +1,23 @@
+{
+  "name": "@donutbrowser/company-automation",
+  "version": "0.2.0",
+  "private": true,
+  "license": "AGPL-3.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/server.js",
+    "dev": "tsx src/server.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "tsx": "^4.21.0",
+    "typescript": "~6.0.3"
+  }
+}

@@ -47,6 +47,8 @@ donutbrowser/
 │   └── Cargo.toml                  # Rust dependencies
 ├── donut-sync/                     # NestJS sync server (self-hostable)
 │   └── src/                        # Controllers, services, auth, S3 sync
+├── company-automation/             # Local-only Company Chromium CDP acceptance module
+├── company-chromium/               # Reproducible Chromium patch/source-lock/build kit
 ├── docs/                           # Documentation (self-hosting guide)
 ├── flake.nix                       # Nix development environment
 └── .github/workflows/              # CI/CD pipelines
@@ -295,6 +297,13 @@ echoes back what it signed (the Rust client must send exactly those headers on
 the PUT or S3 rejects it — hence the echo). `stat` returns `response.Metadata`.
 Older servers omit `metadata` → client falls back to the body-GET path. DTOs:
 `donut-sync/src/sync/dto/sync.dto.ts`; logic: `sync.service.ts`.
+
+## Local Company automation
+
+- `company-automation/` is the independent, loopback-only Company Chromium + Playwright acceptance module.
+- `company-chromium/` contains only the reproducible Chromium source delta, source lock, build arguments, license boundary, and Windows rebuild scripts; it must not vendor a Chromium checkout or build output.
+- It must not call, remove, or bypass Donut/Wayfern paid automation routes.
+- Its default data root is `%LOCALAPPDATA%\DonutBrowserCompanyAutomation` and cloud behavior stays disabled unless a later task explicitly adds and reviews it.
 
 ## Proprietary Changes
 

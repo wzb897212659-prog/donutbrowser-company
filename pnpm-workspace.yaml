@@ -2,6 +2,7 @@ packages:
   - nodecar
   - donut-sync
   - company-control
+  - company-automation
 
 onlyBuiltDependencies:
   - argon2

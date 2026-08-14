@@ -1,0 +1,406 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://chromium.googlesource.com/chromium/src.git",
+    "baseCommit": "031bfd60f544af71d8dd7246970d1af3e1acf3ad",
+    "chromiumVersion": "151.0.7922.76"
+  },
+  "target": {
+    "operatingSystem": "windows",
+    "cpu": "x64",
+    "output": "out/Company/chrome.exe"
+  },
+  "patch": {
+    "path": "patches/0001-company-persona-and-portable-os-crypt.patch",
+    "sha256": "ece8a4f6957bdf0161a2756164e8432997412f3eda4d1858e8b8f9e0621fdc97",
+    "size": 278684,
+    "modifiedFiles": 38,
+    "addedFiles": 14
+  },
+  "buildArgs": {
+    "path": "build/args.gn",
+    "sha256": "32d49ade8dffe1ae066e85415b60b0e67760d10e905042d4fc74ac45fca83809",
+    "size": 210
+  },
+  "chromiumLicense": {
+    "path": "LICENSE.chromium",
+    "sha256": "368cca1106be99d39ecd32a38d8305585d802a475effb66380b91ffc9bcf709b",
+    "size": 1536
+  },
+  "acceptedRuntime": {
+    "executable": "chrome.exe",
+    "sha256": "acaf2d06d60d938cb335c4d9cc71814817c0a25926086bdefb6ca613d69f7bf9",
+    "size": 3870720
+  },
+  "excludedUntrackedPrefixes": [
+    "third_party/disarm/",
+    "third_party/fadec/",
+    "third_party/llvm-libclang/"
+  ],
+  "changedFiles": [
+    {
+      "path": "chrome/app/BUILD.gn",
+      "kind": "modified",
+      "baseSha256": "bd070fe68fa9a844f1f086819c225ba33fd10574545528748a329dedd2b49df1",
+      "patchedSha256": "b8b94af2dc3a052bbd61baa6969bb00a3393d0c0760adf0bf3626b8a5ac5149a",
+      "patchedSize": 6868
+    },
+    {
+      "path": "chrome/app/chrome_main_delegate.cc",
+      "kind": "modified",
+      "baseSha256": "d718e3affcbc6f308a0235302a0d2eb0b69a6a8756f9a8ea5c20b8fc8658791a",
+      "patchedSha256": "de19bc99904c21f96dadc1fa8e8486851fced1489e8889b3b500a0eb3fca9556",
+      "patchedSize": 74000
+    },
+    {
+      "path": "chrome/app/company_persona_config_win_unittest.cc",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "ab1ccd5216ef19803f159e41c2e6fe48a59bf6f68c2745f6989dde7d0f501a42",
+      "patchedSize": 18047
+    },
+    {
+      "path": "chrome/app/company_persona_config_win.cc",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "4a51478bcb011db9229526d9b865fae6d340fd29a9c68274275ce1d6e9c53417",
+      "patchedSize": 22514
+    },
+    {
+      "path": "chrome/app/company_persona_config.h",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "b8927695804f7955cc3cdef60400348702c72dd565dbe519102d245fe0756096",
+      "patchedSize": 5591
+    },
+    {
+      "path": "chrome/browser/browser_process_impl.cc",
+      "kind": "modified",
+      "baseSha256": "9413e0c012cf2f1fbe524f9bb4cac2125a4f7c79e21c5b12f4e902a9b2b3f99d",
+      "patchedSha256": "83b5816640b6d337d8ed03d38297bf6819cbd04d43a3a590f12adf6214b2b81d",
+      "patchedSize": 75811
+    },
+    {
+      "path": "chrome/browser/chrome_content_browser_client_unittest.cc",
+      "kind": "modified",
+      "baseSha256": "74eabd4ac8e2caeb824e975b488a302596575290cd6f6e84719b8147d814dd2b",
+      "patchedSha256": "fe3c8864d198f4d2ffd92b85b62646cbf3b51d3b0a53e27e3475343f4fec6e5f",
+      "patchedSize": 108258
+    },
+    {
+      "path": "chrome/browser/chrome_content_browser_client.cc",
+      "kind": "modified",
+      "baseSha256": "45a8b7e12d791dd57c866dcef54054201de84a6f8ad54033d78cab4386bf39e1",
+      "patchedSha256": "f64ac83e4d4416505badf8ebc74edf48ee66e5e3609a8fa886a759164240b5d4",
+      "patchedSize": 393982
+    },
+    {
+      "path": "chrome/browser/devtools/protocol/devtools_protocol_browsertest.cc",
+      "kind": "modified",
+      "baseSha256": "4e5d5a16ebe281a54207b9984519c86937002da1f118cc0f7d6eb565b6b35ba6",
+      "patchedSha256": "60d549a478cc68247f5729025cabe50b80aa0985bb0cd20b255ee48bf7fabebd",
+      "patchedSize": 101986
+    },
+    {
+      "path": "chrome/browser/devtools/protocol/emulation_handler.cc",
+      "kind": "modified",
+      "baseSha256": "3278058702753267bab343521a2748d40cb88e1c0f05e191e9a9bc06305efde4",
+      "patchedSha256": "8e22e6b3b41bacd4e0d6f69792a870534388e2a0089abb8ce093b36a8c48ac0b",
+      "patchedSize": 13580
+    },
+    {
+      "path": "chrome/browser/net/profile_network_context_service.cc",
+      "kind": "modified",
+      "baseSha256": "badcb31b412ca58bf3a18f6ad0f1998833e860e6ea725998416accbdc9d6c7e2",
+      "patchedSha256": "d346b151301f8bb13b26dbf2a55838d740d217360bf2911e4d839e8bd1a633de",
+      "patchedSize": 70780
+    },
+    {
+      "path": "chrome/browser/os_crypt/BUILD.gn",
+      "kind": "modified",
+      "baseSha256": "30e2d4d560f219903de3ece09da1c75ca0c5b8c40e301c476bc8e7a5449b9bbc",
+      "patchedSha256": "402af728f8709fd02baebd6445856d79ab9740dd348b3a15e71d10d3e5617b20",
+      "patchedSize": 3321
+    },
+    {
+      "path": "chrome/browser/os_crypt/company_portable_key_provider_win_unittest.cc",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "98f4bf22964b4b47d1b97b2f5780b7a77cbeeeeaadbd5d8067bae36b578edd66",
+      "patchedSize": 2572
+    },
+    {
+      "path": "chrome/browser/os_crypt/company_portable_key_provider_win.cc",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "d5eaa385833e1caa2d85e2a7c96430dab312345d6f50630f73f0d361428bacf2",
+      "patchedSize": 1292
+    },
+    {
+      "path": "chrome/browser/os_crypt/company_portable_key_provider_win.h",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "b67607c6f699fb5fef240b1c5374d31710a9386c538ad88a96ab9a9305de9732",
+      "patchedSize": 1362
+    },
+    {
+      "path": "chrome/browser/renderer_preferences_util_unittest.cc",
+      "kind": "modified",
+      "baseSha256": "9471ae557e4b2f513504fb2585e34f82d9462a0bf8ff1960a96ec15d9aa3f25e",
+      "patchedSha256": "998ba1038092a2d2314786f00278209fbf2e5722dfc409eee545b6c0e370cb25",
+      "patchedSize": 6883
+    },
+    {
+      "path": "chrome/browser/renderer_preferences_util.cc",
+      "kind": "modified",
+      "baseSha256": "e857f176705a18a40bb0aac20d22221bc115bbac9849eec663c5b88e9ff30644",
+      "patchedSha256": "d0da7ec1587a3b7015559eadde8e6fe7ac3cd0054bb3e0d1e23fe84e88a583b6",
+      "patchedSize": 8653
+    },
+    {
+      "path": "chrome/BUILD.gn",
+      "kind": "modified",
+      "baseSha256": "89628196187f4985c7c03a8203548f559b8174375a82fe8cc69e0184030f8e72",
+      "patchedSha256": "d0e0d77b244daff69f3b24859e08e84f1d9510dcdfa9cdd074f8b515355a3a12",
+      "patchedSize": 62466
+    },
+    {
+      "path": "components/embedder_support/BUILD.gn",
+      "kind": "modified",
+      "baseSha256": "355120ca227322e7c2c4a2691c8573c2e7b56a0d4c8f8c34b93286a373e4ee38",
+      "patchedSha256": "e646646541a264cfdf3d7eefc29c20e7e35b031c0f7ee8a2fe8bf344470ae664",
+      "patchedSize": 3149
+    },
+    {
+      "path": "components/embedder_support/user_agent_utils_unittest.cc",
+      "kind": "modified",
+      "baseSha256": "bbd15182878308094e451b6530c9e48bbe177be6dce8bf541f694d240e7bed0a",
+      "patchedSha256": "ef88e51cd83c1be01e52d5d5fc8c4fd1e8ec8a99f9a9ed6326cd7fcc8f53eeb5",
+      "patchedSize": 48645
+    },
+    {
+      "path": "components/embedder_support/user_agent_utils.cc",
+      "kind": "modified",
+      "baseSha256": "97c54aed28de1c0b5ba6c60c788dd9c6e16003592f32364c7df8a814009560bf",
+      "patchedSha256": "60622947e26c68200ea5c9d18f4f47a0de9968c51e0e3c8683f57ec035a681bb",
+      "patchedSize": 33928
+    },
+    {
+      "path": "content/browser/devtools/devtools_url_loader_interceptor.cc",
+      "kind": "modified",
+      "baseSha256": "3a32ee4b80c4ff06efafd7535aa5abe867e8c673a493f8154c13f469f6887984",
+      "patchedSha256": "67dd9c92509d7e712f780d49d0abec9d7122f1bb2b273c0bde7ac7a373e7e1d8",
+      "patchedSize": 87817
+    },
+    {
+      "path": "content/browser/devtools/protocol/device_orientation_handler.cc",
+      "kind": "modified",
+      "baseSha256": "d65badc7a25684986cc88f92cf58494d37d011519623de173d0b75d11b06ca64",
+      "patchedSha256": "f90d645bba508e422b1492b78b938b7565782a2e3de5d4896a6efb0179517a0b",
+      "patchedSize": 4092
+    },
+    {
+      "path": "content/browser/devtools/protocol/devtools_protocol_browsertest.cc",
+      "kind": "modified",
+      "baseSha256": "61f1c1b71c686d1125623761ed9cfa982bf7f225dbfdbaffcc40cba4fb4ed395",
+      "patchedSha256": "c08289789eb108c3e2290c2edf06c0a78def5cf5a4c1475184d7b835fe2d6f82",
+      "patchedSize": 217191
+    },
+    {
+      "path": "content/browser/devtools/protocol/emulation_handler.cc",
+      "kind": "modified",
+      "baseSha256": "1447e3b18e2b87ea58a6c60fda002200693b627bee1aa1107f2951cf31c51e4b",
+      "patchedSha256": "f049888b34f3f0bb4f7a4323aff93cc1396ad50d716cd1929a45d02ef351f361",
+      "patchedSize": 54812
+    },
+    {
+      "path": "content/browser/devtools/protocol/fetch_handler.cc",
+      "kind": "modified",
+      "baseSha256": "fea86da2bdf4e148f189316e23f9b664af475a9d39e015ae2d9e9cf83aefb5a3",
+      "patchedSha256": "c43b54fd04f19e324c5fc7a535198ae46a176acc541589ca0a6fd0318f083046",
+      "patchedSize": 19914
+    },
+    {
+      "path": "content/browser/devtools/protocol/network_handler.cc",
+      "kind": "modified",
+      "baseSha256": "c0a925328f2c0edcab7f8e99ec331731085e1abebccc1a15283956ff6e8530a1",
+      "patchedSha256": "fc4df6e3faf0bcc45bb49b9f90b3087b4c66da0e97b582e44a39e2f404f5a2a8",
+      "patchedSize": 203744
+    },
+    {
+      "path": "content/browser/web_contents/web_contents_impl_browsertest.cc",
+      "kind": "modified",
+      "baseSha256": "319bcff5ae79861f5b06850909eb36e999f35a4a16f54780020a2824d3c5870e",
+      "patchedSha256": "7e6dc8c74769a98be234ab0163f2bda635bb0b01a7bd50f876327fde0755a3d0",
+      "patchedSize": 375265
+    },
+    {
+      "path": "content/browser/web_contents/web_contents_impl.cc",
+      "kind": "modified",
+      "baseSha256": "e64af570253350eff239c5b0245415f78637cea51bfc4653b4fea9b2f9a34e05",
+      "patchedSha256": "860857d644187d97094b980e5cea5c3b567a86c542f58d0c27edc37fabaa9702",
+      "patchedSize": 501021
+    },
+    {
+      "path": "content/renderer/BUILD.gn",
+      "kind": "modified",
+      "baseSha256": "73f6f1bcf3b8cf160022ea4938a2e08bfb7a568933c933360108509f634b6304",
+      "patchedSha256": "0e8ed7269a69a9cb0d50e411c5d57e1dd3e28fa9e45d6cd2cf8ca326b49f9b48",
+      "patchedSize": 17422
+    },
+    {
+      "path": "content/renderer/company_persona_init_unittest.cc",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "123b01a8523dc9f2fbd8874d0018608a0f78f0f7814c6970a1a53f31587151d9",
+      "patchedSize": 4600
+    },
+    {
+      "path": "content/renderer/company_persona_init.cc",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "fb91c2650b0beb1b1b4a7b9ad74c235a45143236781a3a33b0a671c93d0d43a4",
+      "patchedSize": 2232
+    },
+    {
+      "path": "content/renderer/company_persona_init.h",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "99f7225628a981cd5d378cea448eb71ae7ce9893a06f1bc457dbe7086abe9df7",
+      "patchedSize": 878
+    },
+    {
+      "path": "content/renderer/renderer_main.cc",
+      "kind": "modified",
+      "baseSha256": "07a2c6dd346d43f00cc09cfe7a51675a41f51506bdaaa86aecfeb1bc31549601",
+      "patchedSha256": "53ee9e1479af75c7352e93422311afd4e45a4022a9d58334f8980595d5398aa9",
+      "patchedSize": 14067
+    },
+    {
+      "path": "docs/company_persona_display_coherence.md",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "a843b1c76d4d91ad8230ce389d4df0fe5d3445efc1224d83a0978afc2648f138",
+      "patchedSize": 6831
+    },
+    {
+      "path": "third_party/blink/common/BUILD.gn",
+      "kind": "modified",
+      "baseSha256": "7df3283bdfd20c2ba9c2dc679e0a1edadb1265f5d8e62eb8ac2090eb60dc4509",
+      "patchedSha256": "3737cc285348b035fd8c2683b9a2b7c256b9a36560d55d9b8875f7e244193667",
+      "patchedSize": 21717
+    },
+    {
+      "path": "third_party/blink/common/company_persona/company_persona_unittest.cc",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "1461c365444c815d7b442fbe0f478046114801b9a698af9270fd5c1260c8a373",
+      "patchedSize": 2260
+    },
+    {
+      "path": "third_party/blink/common/company_persona/company_persona.cc",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "e3f6b78e4daa78cff387a81a4eb373c2baced3301f2738ba0df17fd67a5108cb",
+      "patchedSize": 3268
+    },
+    {
+      "path": "third_party/blink/common/device_memory/approximated_device_memory_unittest.cc",
+      "kind": "modified",
+      "baseSha256": "4f0e1379faf4e3ef6fce569bc7e8616a53cb7b7ceb7a74c9b6cea792853281bb",
+      "patchedSha256": "d69e04e1cc0b5ad083725d4b20599edd79c243f61bb7c1580087e0d50eb5ae60",
+      "patchedSize": 5479
+    },
+    {
+      "path": "third_party/blink/common/device_memory/approximated_device_memory.cc",
+      "kind": "modified",
+      "baseSha256": "85cb1e2dca9e32749a9bfba7b350a496273119c8a5296e70888597340df2b5ad",
+      "patchedSha256": "b8628c497b96e1b82348a31991f12e257d6d849b52148d1378ffd25242f02a45",
+      "patchedSize": 3143
+    },
+    {
+      "path": "third_party/blink/public/common/BUILD.gn",
+      "kind": "modified",
+      "baseSha256": "69db8fd9c9f0cb9fb9265878d04ff9ee043374e9d72152cf7181f7a0e0af6764",
+      "patchedSha256": "3fafc32c97d490681b8d06bc2ffc6b32912a9b290bca066395d5cd1f455e9587",
+      "patchedSize": 15946
+    },
+    {
+      "path": "third_party/blink/public/common/company_persona/company_persona.h",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "81f06455d549aeff37cc1d0f55ad39432c4ae0bf2e231f16469d39ac0d4bceb7",
+      "patchedSize": 2477
+    },
+    {
+      "path": "third_party/blink/renderer/core/execution_context/navigator_base.cc",
+      "kind": "modified",
+      "baseSha256": "03ba02210b80655c8d7bed577372b0ec6364b49c2f7a87d7254f1efcd9a260e0",
+      "patchedSha256": "9c1f7a9046388daba36627080ecf1bbe8bb0944324555255aeabd5330b095ce1",
+      "patchedSize": 3062
+    },
+    {
+      "path": "third_party/blink/renderer/core/frame/build.gni",
+      "kind": "modified",
+      "baseSha256": "44766946afa7c6a33474bfa4fce72806a57ff8978c4bb99214850ab1435d498f",
+      "patchedSha256": "664c391ccf2111c0d56fb87bfa7e018a40b6a908fa6d5e17666cebaded017566",
+      "patchedSize": 8750
+    },
+    {
+      "path": "third_party/blink/renderer/core/frame/navigator_concurrent_hardware_test.cc",
+      "kind": "added",
+      "baseSha256": null,
+      "patchedSha256": "8fee2495004b8a29de9af075059d4cbf35492af8f510a6e18bc29d949e78620a",
+      "patchedSize": 1804
+    },
+    {
+      "path": "third_party/blink/renderer/core/frame/navigator_concurrent_hardware.cc",
+      "kind": "modified",
+      "baseSha256": "7b689c17f7007b7e342412cb27165111fe6b5db8672ac27b8b9fc1ea0f432928",
+      "patchedSha256": "c5c6c8fc5b015c6ab84fe317e7e70e2bffa0af400b07d8b256a67566600082d6",
+      "patchedSize": 609
+    },
+    {
+      "path": "third_party/blink/renderer/core/frame/navigator_language.cc",
+      "kind": "modified",
+      "baseSha256": "6eecd7715b44a514025ef27bebe599c258123ea9c39ac10e4a26022ca0269888",
+      "patchedSha256": "74a53e04f222281e7d069229ca1617d1fb463866fd33e0c3cfd8a6758c603862",
+      "patchedSize": 4461
+    },
+    {
+      "path": "third_party/blink/renderer/core/inspector/inspector_emulation_agent_test.cc",
+      "kind": "modified",
+      "baseSha256": "71c30cd084e26841ea5ac037868d4322a2b089c2a87e0182ed743ee43d86c22b",
+      "patchedSha256": "fd3089b5addd3651ba8eb4d404bb18d28680a281812fc2ac5e1f3ea28f3e1ef4",
+      "patchedSize": 19331
+    },
+    {
+      "path": "third_party/blink/renderer/core/inspector/inspector_emulation_agent.cc",
+      "kind": "modified",
+      "baseSha256": "fa3cc0e309d61d4319505829c2e8d1029e867cbc8c8aa26ae5bed4592e1a2e9b",
+      "patchedSha256": "6e0918aeadb48eb9d4752d19abd755f5cfba5a61043089f249189d85da6f00c2",
+      "patchedSize": 48216
+    },
+    {
+      "path": "third_party/blink/renderer/core/inspector/locale_controller.cc",
+      "kind": "modified",
+      "baseSha256": "47bd6e9856779a9eb4cbcd4f68f42fb6467a8a9ece94da9754c1431d57aa44d8",
+      "patchedSha256": "41a3efbe405a6dbdc8de3a569cc899ea0b9ed46def172b64eb44056b7465d27d",
+      "patchedSize": 3253
+    },
+    {
+      "path": "third_party/blink/renderer/core/timezone/timezone_controller.cc",
+      "kind": "modified",
+      "baseSha256": "4574c1fb3f000be38d206acdb184c5f1d3a0afa75bf28c8cf0f6dd05e6b7382e",
+      "patchedSha256": "93107f6e949210d6324d9a0df10b8de207b9026ab70534a4afbd75f01da0b44a",
+      "patchedSize": 9636
+    },
+    {
+      "path": "third_party/blink/renderer/core/timezone/timezone_controller.h",
+      "kind": "modified",
+      "baseSha256": "ce117c893d79e4c4e61ea4d2c5d7cc752f4de294337b10100c2652cfca149e02",
+      "patchedSha256": "0f61e129c378ad2353c0d25d3f322aa43e6f3b07cbc0ccb5ed6c6553c67dad7e",
+      "patchedSize": 3858
+    }
+  ]
+}
